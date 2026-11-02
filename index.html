@@ -142,6 +142,8 @@
   .week-nav button:disabled { visibility: hidden; }
 
   #reminders input[type=checkbox] { width: 16px; height: 16px; vertical-align: -3px; accent-color: var(--accent); }
+  .sync-card { margin-top: 18px; }
+  .sync-chip { font-size: 12px; color: #d97706; padding: 0; }
   .reset-day { display: block; padding: 4px 0 0; font-size: 12px; }
   .update-banner {
     display: block; width: 100%; margin-bottom: 14px; padding: 10px 14px; border: none; border-radius: 10px;
@@ -471,6 +473,7 @@
     <div class="head-right">
       <div class="today" id="today"></div>
       <button type="button" class="checkin-btn" id="checkinBtn">🌙 Check in</button>
+      <button type="button" class="link sync-chip" id="syncChip" hidden></button>
     </div>
   </header>
   <div class="goal-line" id="goalLine"></div>
@@ -528,6 +531,12 @@
     <input type="file" id="importFile" accept="application/json" hidden>
   </div>
   <div class="hint" id="storageStatus" style="text-align:center;margin-top:10px"></div>
+
+  <section class="habit sync-card" id="syncCard">
+    <div class="habit-top"><span class="dot" style="background:#4285f4"></span><span class="name">☁️ Sync with Google Drive</span></div>
+    <div class="hint" id="syncStatus" style="margin:6px 0 8px"></div>
+    <div class="rate-row" id="syncBtns" style="margin-top:0"></div>
+  </section>
 </main>
 
 <dialog class="badges" id="badgesDialog" aria-labelledby="badgesTitle">
@@ -2611,7 +2620,8 @@
       const after = [b.lastAdded, b.resumeFrom && dayKey(addDays(fromKey(b.resumeFrom), -1)), dayKey(addDays(fromKey(b.start), -1))]
         .filter(Boolean).sort().pop();
       for (let d = nextBillDue(b, after); d && dayKey(d) <= todayKey; d = nextBillDue(b, dayKey(d))) {
-        s.entries.push({ id: uid(), date: dayKey(d), amount: b.amount, category: b.category, note: b.name, billId: b.id });
+        // Same id on every device, so synced copies don't double up a bill payment.
+        s.entries.push({ id: `bill-${b.id}-${dayKey(d)}`, date: dayKey(d), amount: b.amount, category: b.category, note: b.name, billId: b.id });
         b.lastAdded = dayKey(d);
         added = true;
       }
@@ -3607,7 +3617,7 @@
     });
   }
   const getPhotos = async () => ((await photoStore("readonly", s => s.getAll())) || []).sort((a, b) => a.month.localeCompare(b.month));
-  const putPhoto = p => photoStore("readwrite", s => s.put(p));
+  const putPhoto = p => photoStore("readwrite", s => s.put(p)).then(r => { lastPhotoSync = 0; syncSoon(); return r; });
   const deletePhoto = month => photoStore("readwrite", s => s.delete(month));
   const clearPhotos = () => photoStore("readwrite", s => s.clear());
 
@@ -4126,7 +4136,7 @@
   // ---- Updates ----
   // Bump APP_VERSION with every deploy. An open app checks the live copy now and then,
   // and offers a refresh when the version there is newer.
-  const APP_VERSION = "2026.11.02-2";
+  const APP_VERSION = "2026.11.02-3";
   async function checkForUpdate() {
     if (!location.protocol.startsWith("http") || !navigator.onLine) return;
     try {
@@ -4134,6 +4144,319 @@
       const live = html.match(/const APP_VERSION = "([^"]+)"/)?.[1];
       if (live && live !== APP_VERSION) document.getElementById("updateBanner").hidden = false;
     } catch {}
+  }
+
+  // ---- Sync with Google Drive ----
+  // Your data is kept in a hidden app folder in your own Google Drive (drive.appdata scope:
+  // only this app can see it). Each device merges its copy with Drive's piece by piece, so
+  // logging on two devices the same day keeps both. Sign-in uses Google's token flow; the
+  // access token lasts about an hour, after which a tap reconnects.
+  const GOOGLE_CLIENT_ID = "573379670688-4cn4m6pk01d5p6a35brmm4gvmmhtv9cd.apps.googleusercontent.com";
+  const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+  const DRIVE = "https://www.googleapis.com";
+  const SYNC_FILE = "habits-sync.json";
+  const SYNC_KEY = "habit-tracker-sync";
+  const SYNC_EVERY = 3 * 60 * 1000;
+  // Arrays whose items have ids are merged item by item; any other array is merged whole.
+  const ID_ARRAYS = new Set(["/habits", "/spending/entries", "/spending/favorites", "/spending/recurring",
+    "/weight/entries", "/trading/firms", "/trading/payouts", "/trading/costs"]);
+
+  // Device-only sync settings and change times (not part of backups).
+  let sync = loadSync();
+  function loadSync() {
+    try { return { enabled: false, stamps: {}, ...(JSON.parse(localStorage.getItem(SYNC_KEY)) || {}) }; }
+    catch { return { enabled: false, stamps: {} }; }
+  }
+  function saveSync() { try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch {} }
+  const tokenValid = () => sync.token && Date.now() < (sync.tokenExp || 0);
+  let syncStatus = { state: "idle", error: "" }; // idle | syncing | error
+
+  // Flattens data into { "/path": json } leaves so two copies can be compared and merged.
+  function flatten(value, path = "", out = {}) {
+    if (Array.isArray(value) && ID_ARRAYS.has(path)) {
+      out[`${path}/#order`] = JSON.stringify(value.map(v => v.id));
+      for (const v of value) flatten(v, `${path}/@${encodeURIComponent(v.id)}`, out);
+    } else if (value && typeof value === "object" && !Array.isArray(value)) {
+      for (const [k, v] of Object.entries(value)) flatten(v, `${path}/${encodeURIComponent(k)}`, out);
+    } else out[path] = JSON.stringify(value);
+    return out;
+  }
+  function unflatten(flat) {
+    const root = {};
+    for (const [path, json] of Object.entries(flat)) {
+      const parts = path.split("/").slice(1);
+      let node = root;
+      for (let i = 0; i < parts.length - 1; i++) node = (node[parts[i]] ??= {});
+      node[parts[parts.length - 1]] = JSON.parse(json);
+    }
+    const convert = node => {
+      if (!node || typeof node !== "object" || Array.isArray(node)) return node;
+      if ("#order" in node) {
+        const items = {};
+        // An item without its id leaf was deleted somewhere; leftover edits don't bring it back.
+        for (const [k, v] of Object.entries(node)) if (k[0] === "@" && v && "id" in v) items[decodeURIComponent(k.slice(1))] = convert(v);
+        const order = node["#order"] || [];
+        return [...order.filter(id => id in items), ...Object.keys(items).filter(id => !order.includes(id))].map(id => items[id]);
+      }
+      const out = {};
+      for (const [k, v] of Object.entries(node)) out[decodeURIComponent(k)] = convert(v);
+      return out;
+    };
+    return convert(root);
+  }
+
+  // Records when each piece changed (or was deleted), so the newer side wins when merging.
+  function noteChange(prevSnap, nextSnap) {
+    if (!sync.enabled) return;
+    const a = flatten(JSON.parse(prevSnap)), b = flatten(JSON.parse(nextSnap));
+    const now = Date.now();
+    for (const p of new Set([...Object.keys(a), ...Object.keys(b)])) if (a[p] !== b[p]) sync.stamps[p] = now;
+    saveSync();
+    syncSoon();
+  }
+
+  // Newer change wins per piece; pieces only one side has are kept; on a tie Drive's copy wins.
+  function mergeFlat(lf, ls, rf, rs) {
+    const flat = {}, stamps = {};
+    for (const p of new Set([...Object.keys(lf), ...Object.keys(rf), ...Object.keys(ls), ...Object.keys(rs)])) {
+      const lt = ls[p] || 0, rt = rs[p] || 0;
+      const from = lt > rt ? "l" : rt > lt ? "r" : p in rf ? "r" : "l";
+      const v = from === "l" ? lf[p] : rf[p];
+      if (v !== undefined) flat[p] = v;
+      if (lt || rt) stamps[p] = Math.max(lt, rt);
+    }
+    return { flat, stamps };
+  }
+
+  // Replaces local data with the merged copy (no Undo, no change stamps — it came from sync).
+  function applyMerged(m) {
+    habits = (m.habits || []).map(h => ({ ...h, done: h.done || {} }));
+    work = { rates: [], hours: {}, ...(m.work || {}) };
+    spending = normalizeSpending(m.spending);
+    weight = { weighDay: 1, goal: null, entries: [], ...(m.weight || {}) };
+    trading = normalizeTrading(m.trading);
+    monthly = normalizeMonthly(m.monthly);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(habits));
+      localStorage.setItem(WORK_KEY, JSON.stringify(work));
+      localStorage.setItem(SPEND_KEY, JSON.stringify(spending));
+      localStorage.setItem(WEIGHT_KEY, JSON.stringify(weight));
+      localStorage.setItem(TRADING_KEY, JSON.stringify(trading));
+      localStorage.setItem(MONTHLY_KEY, JSON.stringify(monthly));
+    } catch {}
+    lastState = snapshot();
+    if (undo) { clearTimeout(undo.timer); hideToast(); }
+    editing = null; weightView.editId = null;
+    render(); renderWeight(); renderWork(); renderTrading(); renderSpending(); renderGoalLine();
+    if (checkinIsOpen()) renderCheckin();
+  }
+
+  // ---- Drive requests ----
+  async function driveFetch(url, opts = {}) {
+    const r = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: `Bearer ${sync.token}` } });
+    if (r.status === 401 || r.status === 403) { sync.token = null; saveSync(); throw new Error("auth"); }
+    if (!r.ok) { const e = new Error(`Drive error ${r.status}`); e.status = r.status; throw e; }
+    return r;
+  }
+  async function driveList(q) {
+    const r = await driveFetch(`${DRIVE}/drive/v3/files?spaces=appDataFolder&pageSize=1000&fields=files(id,name)&q=${encodeURIComponent(q + " and trashed=false")}`);
+    return (await r.json()).files || [];
+  }
+  async function driveCreate(name, content, mime) {
+    const b = `habits${Date.now()}`;
+    const body = new Blob([
+      `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name, parents: ["appDataFolder"] })}\r\n--${b}\r\nContent-Type: ${mime}\r\n\r\n`,
+      content, `\r\n--${b}--`]);
+    const r = await driveFetch(`${DRIVE}/upload/drive/v3/files?uploadType=multipart&fields=id`, {
+      method: "POST", headers: { "Content-Type": `multipart/related; boundary=${b}` }, body });
+    return (await r.json()).id;
+  }
+  const driveUpdate = (id, content, mime) => driveFetch(`${DRIVE}/upload/drive/v3/files/${id}?uploadType=media`, { method: "PATCH", headers: { "Content-Type": mime }, body: content });
+  const driveDownload = id => driveFetch(`${DRIVE}/drive/v3/files/${id}?alt=media`);
+  const driveDelete = id => driveFetch(`${DRIVE}/drive/v3/files/${id}`, { method: "DELETE" });
+
+  async function readRemote() {
+    if (!sync.fileId) sync.fileId = (await driveList(`name='${SYNC_FILE}'`))[0]?.id || null;
+    if (!sync.fileId) return null;
+    try { return await (await driveDownload(sync.fileId)).json(); }
+    catch (e) {
+      if (e.status !== 404) throw e;
+      sync.fileId = null; // the file was removed; look it up again next time
+      return readRemote();
+    }
+  }
+
+  // ---- The sync cycle ----
+  let syncing = false, syncAgain = false, syncTimer = null, lastPhotoSync = 0;
+  function syncSoon() {
+    clearTimeout(syncTimer);
+    if (sync.enabled) syncTimer = setTimeout(syncNow, 4000);
+  }
+
+  async function syncNow() {
+    if (!sync.enabled) return; // only possible after signing in
+    if (!tokenValid()) { renderSyncStatus(); return; }
+    if (!navigator.onLine) { renderSyncStatus(); return; }
+    if (syncing) { syncAgain = true; return; }
+    syncing = true;
+    syncStatus = { state: "syncing", error: "" };
+    renderSyncStatus();
+    try {
+      const startSnap = snapshot();
+      const local = JSON.parse(startSnap);
+      const remote = await readRemote();
+      const lf = flatten(local);
+      // First sync on this device with data already in Drive: entries only one side has are
+      // always kept; this decides which side wins where the two disagree.
+      if (sync.firstMerge) {
+        if (remote?.data && confirm("Your Google Drive already has habit data from another device.\n\n" +
+            "OK — this device is more up to date (its entries win where they differ)\n" +
+            "Cancel — the other device is more up to date")) {
+          const now = Date.now();
+          for (const p of Object.keys(lf)) sync.stamps[p] = now;
+        }
+        sync.firstMerge = false;
+      }
+      let flat = lf, stamps = sync.stamps;
+      if (remote?.data) ({ flat, stamps } = mergeFlat(lf, sync.stamps, flatten(remote.data), remote.stamps || {}));
+      // Something changed while Drive was being read: start over so it isn't lost.
+      if (snapshot() !== startSnap) { syncAgain = true; return; }
+      const merged = unflatten(flat);
+      const mergedFlat = flatten(merged);
+      const differs = (a, b) => Object.keys(a).length !== Object.keys(b).length || Object.keys(a).some(k => a[k] !== b[k]);
+      if (differs(lf, mergedFlat)) applyMerged(merged);
+      sync.stamps = stamps;
+      const remoteFlat = remote?.data ? flatten(remote.data) : null;
+      if (!remoteFlat || differs(remoteFlat, flatten(JSON.parse(snapshot()))) || JSON.stringify(remote.stamps || {}) !== JSON.stringify(stamps)) {
+        const body = JSON.stringify({ version: 1, updatedAt: Date.now(), data: JSON.parse(snapshot()), stamps });
+        if (sync.fileId) await driveUpdate(sync.fileId, body, "application/json");
+        else sync.fileId = await driveCreate(SYNC_FILE, body, "application/json");
+      }
+      if (Date.now() - lastPhotoSync > 5 * 60 * 1000) { await syncPhotos(); lastPhotoSync = Date.now(); }
+      sync.lastSync = Date.now();
+      saveSync();
+      syncStatus = { state: "idle", error: "" };
+    } catch (e) {
+      syncStatus = { state: "error", error: e.message === "auth" ? "" : e.message || "Sync failed" };
+    } finally {
+      syncing = false;
+      renderSyncStatus();
+      if (syncAgain) { syncAgain = false; syncSoon(); }
+    }
+  }
+
+  // Photos: one file per month; the newer photo for a month wins. Deleting a photo only
+  // removes it from this device (it would come back from Drive), so delete on each device.
+  async function syncPhotos() {
+    let local;
+    try { local = await getPhotos(); } catch { return; } // no IndexedDB here
+    const remote = {};
+    for (const f of await driveList("name contains 'photo-'")) {
+      const m = f.name.match(/^photo-(\d{4}-\d{2})_(\d{4}-\d{2}-\d{2})\.jpg$/);
+      if (m && (!remote[m[1]] || remote[m[1]].date < m[2])) remote[m[1]] = { id: f.id, date: m[2], old: remote[m[1]] };
+    }
+    for (const p of local) {
+      const r = remote[p.month];
+      if (!r || r.date < p.date) {
+        await driveCreate(`photo-${p.month}_${p.date}.jpg`, p.blob, "image/jpeg");
+        if (r) await driveDelete(r.id).catch(() => {});
+      }
+    }
+    for (const [month, r] of Object.entries(remote)) {
+      const l = local.find(p => p.month === month);
+      if (!l || l.date < r.date) await putPhoto({ month, date: r.date, blob: await (await driveDownload(r.id)).blob() });
+    }
+  }
+
+  // ---- Google sign-in ----
+  let tokenClient = null;
+  function loadGis() {
+    return new Promise((resolve, reject) => {
+      if (window.google?.accounts?.oauth2) { resolve(); return; }
+      const s = document.createElement("script");
+      s.src = "https://accounts.google.com/gsi/client";
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error("Couldn't reach Google — check your connection."));
+      document.head.append(s);
+    });
+  }
+  // Must run straight from a tap so the Google window isn't blocked.
+  function requestToken(first) {
+    if (!window.google?.accounts?.oauth2) {
+      loadGis().then(renderSyncStatus).catch(e => { syncStatus = { state: "error", error: e.message }; renderSyncStatus(); });
+      syncStatus = { state: "error", error: "Loading Google sign-in… tap again in a moment." };
+      renderSyncStatus();
+      return;
+    }
+    tokenClient = tokenClient || google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: DRIVE_SCOPE,
+      callback: r => {
+        if (r.error) { syncStatus = { state: "error", error: "Google sign-in didn't finish." }; renderSyncStatus(); return; }
+        sync.token = r.access_token;
+        sync.tokenExp = Date.now() + (Number(r.expires_in) - 60) * 1000;
+        // First connection on this device: the first sync asks which copy is newer.
+        if (!sync.enabled) { sync.firstMerge = true; sync.stamps = {}; }
+        sync.enabled = true;
+        saveSync();
+        syncNow();
+      },
+      error_callback: () => { syncStatus = { state: "error", error: "Google sign-in was closed." }; renderSyncStatus(); }
+    });
+    tokenClient.requestAccessToken({ prompt: first ? "consent" : "" });
+  }
+
+  function disconnectSync() {
+    if (!confirm("Stop syncing on this device? Your data stays here and in your Google Drive.")) return;
+    try { if (sync.token) google.accounts.oauth2.revoke(sync.token, () => {}); } catch {}
+    sync = { enabled: false, stamps: {} };
+    saveSync();
+    syncStatus = { state: "idle", error: "" };
+    renderSyncStatus();
+  }
+
+  function agoText(t) {
+    const m = Math.round((Date.now() - t) / 60000);
+    return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
+  }
+
+  function renderSyncStatus() {
+    const card = document.getElementById("syncCard");
+    const chip = document.getElementById("syncChip");
+    if (!card) return;
+    const status = document.getElementById("syncStatus");
+    const btns = document.getElementById("syncBtns");
+    btns.innerHTML = "";
+    const button = (text, fn, primary) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = text;
+      if (primary) b.className = "primary";
+      b.onclick = fn;
+      btns.append(b);
+    };
+    let chipText = "";
+    if (!GOOGLE_CLIENT_ID) {
+      status.textContent = "Sync isn't set up yet.";
+    } else if (!sync.enabled) {
+      status.textContent = "Keep your phone and computer in step through your own Google Drive.";
+      button("Connect Google Drive", () => requestToken(true), true);
+    } else if (!tokenValid()) {
+      status.textContent = `Paused — tap to reconnect.${sync.lastSync ? ` Last synced ${agoText(sync.lastSync)}.` : ""}`;
+      button("Reconnect", () => requestToken(false), true);
+      button("Disconnect", disconnectSync);
+      chipText = "☁️ Tap to sync";
+    } else {
+      status.textContent = syncStatus.state === "syncing" ? "Syncing…"
+        : syncStatus.state === "error" ? `Couldn't sync: ${syncStatus.error}`
+        : !navigator.onLine ? "Offline — will sync when you're back online."
+        : sync.lastSync ? `✓ Synced ${agoText(sync.lastSync)}` : "Connected.";
+      button("Sync now", syncNow);
+      button("Disconnect", disconnectSync);
+      if (syncStatus.state === "error") chipText = "☁️ Sync problem";
+    }
+    if (syncStatus.state === "error" && syncStatus.error && !tokenValid() && sync.enabled) status.textContent += ` (${syncStatus.error})`;
+    chip.hidden = !chipText;
+    chip.textContent = chipText;
   }
 
   // ---- Backups ----
@@ -4208,6 +4531,7 @@
     if (now === lastState) return;
     const prev = lastState;
     lastState = now;
+    noteChange(prev, now); // for sync
     // Repeated edits to the same thing (like typing hours) undo together.
     if (!(undo && mergeKey && undo.mergeKey === mergeKey)) {
       clearTimeout(undo?.timer);
@@ -4245,10 +4569,11 @@
 
   document.getElementById("toastUndo").onclick = () => {
     if (!undo) return;
-    const snap = undo.snap;
+    const snap = undo.snap, cur = lastState;
     clearTimeout(undo.timer);
     restore(JSON.parse(snap));
     lastState = snap;
+    noteChange(cur, snap); // an undo is a change too, for sync
     hideToast();
   };
   document.getElementById("importBtn").onclick = () => document.getElementById("importFile").click();
@@ -4450,6 +4775,16 @@
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkForUpdate(); });
 
   document.getElementById("resetDayBtn").onclick = resetToday;
+  document.getElementById("syncChip").onclick = () => tokenValid() ? syncNow() : requestToken(false);
+  // Sync: on open, a few seconds after each change (see noteChange), every few minutes,
+  // when the app comes back to the front or goes to the back, and when back online.
+  if (GOOGLE_CLIENT_ID) loadGis().then(renderSyncStatus).catch(() => {});
+  setTimeout(syncNow, 1500);
+  setInterval(() => { if (document.visibilityState === "visible") syncNow(); }, SYNC_EVERY);
+  setInterval(renderSyncStatus, 60 * 1000); // keeps "synced X min ago" current
+  document.addEventListener("visibilitychange", () => syncNow());
+  window.addEventListener("online", syncNow);
+  renderSyncStatus();
 
   const lbDialog = document.getElementById("lbDialog");
   document.getElementById("lookbackBtn").onclick = openLookback;
