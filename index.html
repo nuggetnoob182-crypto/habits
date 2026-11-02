@@ -142,6 +142,7 @@
   .week-nav button:disabled { visibility: hidden; }
 
   #reminders input[type=checkbox] { width: 16px; height: 16px; vertical-align: -3px; accent-color: var(--accent); }
+  .reset-day { display: block; padding: 4px 0 0; font-size: 12px; }
   .update-banner {
     display: block; width: 100%; margin-bottom: 14px; padding: 10px 14px; border: none; border-radius: 10px;
     background: #4f46e5; color: #fff; font-weight: 700; font-size: 14px; text-align: left;
@@ -475,7 +476,8 @@
   <div class="goal-line" id="goalLine"></div>
 
   <section class="summary">
-    <div class="stat"><b id="sumToday">–</b><span id="sumTodayLabel">done today</span></div>
+    <div class="stat"><b id="sumToday">–</b><span id="sumTodayLabel">done today</span>
+      <button type="button" class="link reset-day" id="resetDayBtn">↺ Reset today</button></div>
     <button type="button" class="stat stat-btn" id="badgesBtn" title="See your badges">
       <b id="sumPerfect">🌟 0</b><span>perfect-day streak · 🏅 badges</span>
     </button>
@@ -4101,10 +4103,30 @@
     if (!dlg.open) dlg.showModal();
   }
 
+  // ---- Reset today ----
+  // Clears today's check-offs, counts, answers, times, workouts and excused marks for every
+  // habit. Journal entries and notes are kept; one Undo brings everything back.
+  function resetToday() {
+    const k = dayKey(startOfToday());
+    const touched = habits.filter(h => !h.journal && (k in h.done || h.answers?.[k] || h.log?.[k] || h.minutes?.[k] !== undefined || h.details?.[k] || h.excused?.[k]));
+    if (!touched.length) { alert("Nothing has been logged for today yet."); return; }
+    if (!confirm(`Reset today for ${touched.length} habit${touched.length === 1 ? "" : "s"}? Your journal and notes stay. You can undo this.`)) return;
+    for (const h of touched) {
+      // Chapters tapped today come back off the Bible bookmark.
+      if (h.bible) h.position = Math.max((h.position || 0) - Math.min(count(h, k), target(h)), 0);
+      delete h.done[k];
+      for (const field of ["answers", "log", "minutes", "details", "excused"]) if (h[field]) delete h[field][k];
+    }
+    editing = null;
+    save("Reset today");
+    render();
+    if (checkinIsOpen()) renderCheckin();
+  }
+
   // ---- Updates ----
   // Bump APP_VERSION with every deploy. An open app checks the live copy now and then,
   // and offers a refresh when the version there is newer.
-  const APP_VERSION = "2026.11.02-1";
+  const APP_VERSION = "2026.11.02-2";
   async function checkForUpdate() {
     if (!location.protocol.startsWith("http") || !navigator.onLine) return;
     try {
@@ -4426,6 +4448,8 @@
   setTimeout(checkForUpdate, 5000);
   setInterval(checkForUpdate, 30 * 60 * 1000);
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkForUpdate(); });
+
+  document.getElementById("resetDayBtn").onclick = resetToday;
 
   const lbDialog = document.getElementById("lbDialog");
   document.getElementById("lookbackBtn").onclick = openLookback;
