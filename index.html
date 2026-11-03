@@ -150,6 +150,46 @@
   .meal-btn { padding: 8px 6px; font-size: 14px; font-weight: 600; }
   .meal-row.compact .meal-btn { padding: 5px 8px; font-size: 12px; }
   .meal-btn.on { color: #fff; }
+  .pic-prompt { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: var(--empty); font-size: 14px; }
+  .pic-prompt span { flex: 1; font-weight: 600; }
+  .pic-line { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .ghost-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); margin: 4px 0 8px; }
+  .ghost-toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
+  dialog.capture { width: min(520px, calc(100% - 16px)); }
+  .cap-stage { position: relative; aspect-ratio: 3 / 4; background: #000; border-radius: 12px; overflow: hidden; display: grid; place-items: center; }
+  .cap-stage video, .cap-stage > img:not(.ghost) { width: 100%; height: 100%; object-fit: cover; }
+  .cap-stage video.mirror { transform: scaleX(-1); }
+  .cap-stage .ghost { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .35; pointer-events: none; }
+  .cap-msg { color: #d1d5db; font-size: 14px; padding: 16px; text-align: center; }
+  .cap-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+  .cap-btns .primary { flex: 1; }
+  .cap-pick { border: 1px solid var(--border); border-radius: 10px; padding: 9px 14px; cursor: pointer; font-size: 15px; }
+  .cap-summary { display: grid; gap: 6px; margin: 6px 0 12px; }
+  .cap-summary div { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; font-size: 14px; }
+  .cap-summary small { color: var(--muted); }
+  .pic-month { margin-top: 14px; }
+  .pic-month h3 { margin: 0 0 6px; font-size: 14px; }
+  .pic-month h3 small { color: var(--muted); font-weight: 400; }
+  .pose-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .pose-row figure { margin: 0; }
+  .pose-row img, .pic-pair img, .photo-grid img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 8px; display: block; cursor: zoom-in; background: var(--empty); }
+  .pose-row figcaption { font-size: 10px; color: var(--muted); margin-top: 2px; line-height: 1.2; }
+  .pose-add { aspect-ratio: 3 / 4; padding: 4px; border: 2px dashed var(--border); border-radius: 8px; display: grid; place-content: center; gap: 2px; text-align: center; background: none; }
+  .pose-add span { font-size: 20px; color: var(--muted); }
+  .pose-add small { font-size: 10px; color: var(--muted); line-height: 1.2; }
+  .pic-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .pic-pair figure { margin: 0; }
+  .pic-pair figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .pic-change { text-align: center; font-size: 15px; margin: 10px 0 0; }
+  .pic-viewer { position: fixed; inset: 0; z-index: 5; background: rgba(0,0,0,.92); display: grid; grid-template-rows: 1fr auto; }
+  .pic-viewer[hidden] { display: none; }
+  .pic-viewer img { width: 100%; height: 100%; object-fit: contain; min-height: 0; }
+  .pic-viewer-bar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; color: #f9fafb; font-size: 14px; }
+  .pic-viewer-bar span { flex: 1; }
+  .lb-pose { margin-top: 10px; }
+  .lb-pose b { font-size: 13px; }
+  .lb-pose-tabs { margin-top: 14px; }
+  .export-choices b small { font-weight: 400; color: var(--muted); }
   .reset-day { display: block; padding: 4px 0 0; font-size: 12px; }
   .update-banner {
     display: block; width: 100%; margin-bottom: 14px; padding: 10px 14px; border: none; border-radius: 10px;
@@ -610,15 +650,29 @@
 </dialog>
 
 <dialog class="badges" id="photosDialog" aria-labelledby="photosTitle">
-  <div class="badges-head"><h2 id="photosTitle">📸 Progress photos</h2><button type="button" class="link" id="photosClose" aria-label="Close">✕</button></div>
+  <div class="badges-head">
+    <div><h2 id="photosTitle">📸 Progress photos</h2>
+      <div class="tabs" id="photoTabs"><button type="button" data-tab="monthly">Monthly</button><button type="button" data-tab="weekly">Weekly</button><button type="button" data-tab="compare">Compare</button></div>
+    </div>
+    <button type="button" class="link" id="photosClose" aria-label="Close">✕</button>
+  </div>
   <div class="badges-body" id="photosBody"></div>
+  <div class="pic-viewer" id="picViewer" hidden></div>
+</dialog>
+
+<dialog class="badges capture" id="captureDialog" aria-labelledby="captureTitle">
+  <div class="badges-head">
+    <div><h2 id="captureTitle">📸 Photos</h2><span class="ci-status" id="captureProgress"></span></div>
+    <button type="button" class="link" id="captureClose" aria-label="Close">✕</button>
+  </div>
+  <div class="badges-body" id="captureBody"></div>
 </dialog>
 
 <dialog class="badges" id="exportDialog" aria-labelledby="exportTitle">
   <div class="badges-head"><h2 id="exportTitle">Export a backup</h2><button type="button" class="link" id="exportCancel" aria-label="Close">✕</button></div>
   <div class="badges-body export-choices">
-    <button type="button" id="exportAll"><b>Everything</b><span>All your data plus progress photos (<span id="exportPhotoCount"></span>)</span></button>
-    <button type="button" id="exportLite"><b>Without photos</b><span>All your data, much smaller file</span></button>
+    <button type="button" id="exportAll"><b>Everything <small id="exportAllSize"></small></b><span>All your data plus progress photos (<span id="exportPhotoCount"></span>)</span></button>
+    <button type="button" id="exportLite"><b>Without photos <small id="exportLiteSize"></small></b><span>All your data, much smaller file</span></button>
   </div>
 </dialog>
 
@@ -1721,6 +1775,7 @@
 
     const trading = checkinTrading(todayKey);
     if (trading) body.append(trading);
+    if (weeklyPicDue()) { const s = section("Weigh-in day"); s.append(weeklyPicPrompt()); }
 
     const open = checkinHabits(todayKey);
     if (open.length) {
@@ -2519,6 +2574,7 @@
           <span class="streak">${streak ? `🔥 ${streak} week${streak === 1 ? "" : "s"}` : "No streak"}</span>
         </div>
         <div class="hint" style="margin:6px 0 0">${status}</div>
+        <div id="weightPics"></div>
         <form class="rate-row" id="weightForm">
           <label><input type="number" id="weightLbs" min="1" max="1500" step="0.1" inputmode="decimal" placeholder="0.0" required style="width:90px"> lbs</label>
           <input type="date" id="weightDate">
@@ -2619,6 +2675,20 @@
         wrap.append(more);
       }
       document.getElementById("weightList").append(wrap);
+    }
+    // Weekly physique pic: prompt on the weigh-in day, otherwise the photo streak.
+    const picsBox = document.getElementById("weightPics");
+    if (weeklyPicDue()) picsBox.append(weeklyPicPrompt());
+    else {
+      const n = weeklyPicStreak();
+      const line = document.createElement("div");
+      line.className = "pic-line";
+      line.innerHTML = `📸 Physique pics: ${n ? `🔥 ${n} week${n === 1 ? "" : "s"}` : "no streak"}${hasWeekPic(thisWeekKey()) ? " · ✓ this week" : ""}`;
+      const open = document.createElement("button");
+      open.type = "button"; open.className = "link"; open.textContent = "Photos";
+      open.onclick = () => openPhotos("weekly");
+      line.append(" ", open);
+      picsBox.append(line);
     }
     // Weigh-ins can earn streak badges too.
     if (celebrated) checkCelebrations();
@@ -3680,30 +3750,69 @@
   }
   const monthRec = ym => (monthly.months[ym] = monthly.months[ym] || {});
 
-  // Progress photos live in IndexedDB (too big for localStorage), one per month.
+  // Progress photos live in IndexedDB (too big for localStorage), in the "pics" store:
+  //   monthly 5-pose set: { id: "m:YYYY-MM:pose", kind: "month", month, pose, date, blob }
+  //   weekly physique:    { id: "w:<week start>", kind: "week", week, date, blob }
   const PHOTO_DB = "habit-tracker-photos";
+  const POSES = [["front", "Front, relaxed"], ["back", "Back, relaxed"], ["left", "Left side"], ["right", "Right side"], ["flex", "Front, flexed"]];
+  const poseName = id => POSES.find(p => p[0] === id)?.[1] || id;
+  const monthPicId = (ym, pose) => `m:${ym}:${pose}`;
+  const weekPicId = wk => `w:${wk}`;
+  // One shared connection; it steps aside if another tab needs to upgrade the database.
+  let photoDbPromise = null;
   function photoDb() {
+    return photoDbPromise ??= openPhotoDb().then(db => {
+      db.onversionchange = () => { db.close(); photoDbPromise = null; };
+      return db;
+    }).catch(e => { photoDbPromise = null; throw e; });
+  }
+  function openPhotoDb() {
     return new Promise((resolve, reject) => {
       if (!window.indexedDB) { reject(new Error("no indexedDB")); return; }
-      const req = indexedDB.open(PHOTO_DB, 1);
-      req.onupgradeneeded = () => req.result.createObjectStore("photos", { keyPath: "month" });
+      const req = indexedDB.open(PHOTO_DB, 2);
+      req.onupgradeneeded = () => {
+        const db = req.result, tx = req.transaction;
+        if (!db.objectStoreNames.contains("pics")) db.createObjectStore("pics", { keyPath: "id" });
+        // Version 1 kept one photo per month: it becomes that month's "Front, relaxed" pose.
+        if (db.objectStoreNames.contains("photos")) {
+          const pics = tx.objectStore("pics");
+          tx.objectStore("photos").openCursor().onsuccess = e => {
+            const c = e.target.result;
+            if (!c) { db.deleteObjectStore("photos"); return; }
+            const p = c.value;
+            pics.put({ id: monthPicId(p.month, "front"), kind: "month", month: p.month, pose: "front", date: p.date, blob: p.blob });
+            c.continue();
+          };
+        }
+      };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
   }
-  async function photoStore(mode, fn) {
+  async function picStore(mode, fn) {
     const db = await photoDb();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction("photos", mode);
-      const req = fn(tx.objectStore("photos"));
+      const tx = db.transaction("pics", mode);
+      const req = fn(tx.objectStore("pics"));
       tx.oncomplete = () => resolve(req?.result);
       tx.onerror = () => reject(tx.error);
     });
   }
-  const getPhotos = async () => ((await photoStore("readonly", s => s.getAll())) || []).sort((a, b) => a.month.localeCompare(b.month));
-  const putPhoto = p => photoStore("readwrite", s => s.put(p)).then(r => { lastPhotoSync = 0; syncSoon(); return r; });
-  const deletePhoto = month => photoStore("readwrite", s => s.delete(month));
-  const clearPhotos = () => photoStore("readwrite", s => s.clear());
+  const getPics = async () => ((await picStore("readonly", s => s.getAll())) || []).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  const getPic = id => picStore("readonly", s => s.get(id));
+  // Saving a photo also queues it for Drive sync and refreshes the photo list.
+  const putPic = p => picStore("readwrite", s => s.put(p)).then(r => { lastPhotoSync = 0; syncSoon(); refreshPicIndex(); return r; });
+  const deletePic = id => picStore("readwrite", s => s.delete(id)).then(r => { refreshPicIndex(); return r; });
+  const clearPics = () => picStore("readwrite", s => s.clear()).then(r => { refreshPicIndex(); return r; });
+
+  // A list of photos without the images, so cards can show photo streaks right away.
+  let picIndex = [];
+  async function refreshPicIndex() {
+    try { picIndex = (await getPics()).map(({ id, kind, month, pose, week, date, blob }) => ({ id, kind, month, pose, week, date, size: blob?.size || 0 })); }
+    catch { picIndex = []; }
+    renderWeight();
+    if (checkinIsOpen()) renderCheckin();
+  }
 
   // Shrinks a picture to at most 1080px wide as a JPEG.
   async function resizePhoto(file) {
@@ -3752,7 +3861,7 @@
   // New-month screen: rate last month, set this month's goal, add a progress photo.
   let monthDlg = { rateYm: null, goalYm: null, photoFile: null };
   function openMonthDialog(opts) {
-    monthDlg = { rateYm: null, goalYm: null, photoYm: null, photoFile: null, ...opts };
+    monthDlg = { rateYm: null, goalYm: null, photoYm: null, takePhotos: true, ...opts };
     renderMonthDialog();
     const dlg = document.getElementById("monthDialog");
     if (!dlg.open) dlg.showModal();
@@ -3801,17 +3910,19 @@
     if (photoYm) {
       const s = document.createElement("section");
       s.className = "ci-sec";
-      s.innerHTML = `<h3>📸 Progress photo</h3><p class="hint" style="margin:0 0 8px">One photo a month, side by side over time. Stays on this device (and in full backups).</p>`;
-      const pick = document.createElement("label");
-      pick.className = "photo-pick";
-      pick.innerHTML = `<input type="file" accept="image/*" hidden><span>${monthDlg.photoFile ? `✓ ${monthDlg.photoFile.name || "Photo chosen"}` : "Choose or take a photo"}</span>`;
-      pick.querySelector("input").onchange = e => { monthDlg.photoFile = e.target.files[0] || null; renderMonthDialog(); };
-      s.append(pick);
+      s.innerHTML = `<h3>📸 This month's 5 photos</h3><p class="hint" style="margin:0 0 8px">One pose at a time: ${POSES.map(p => p[1]).join(" · ")}. Skip any you like.</p>`;
+      const lbl = document.createElement("label");
+      lbl.className = "ghost-toggle";
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.checked = monthDlg.takePhotos !== false;
+      cb.onchange = () => { monthDlg.takePhotos = cb.checked; };
+      lbl.append(cb, " Take them after saving");
+      s.append(lbl);
       body.append(s);
     }
   }
   async function saveMonthDialog() {
-    const { rateYm, goalYm, photoYm, photoFile } = monthDlg;
+    const { rateYm, goalYm, photoYm } = monthDlg;
     if (rateYm && monthDlg.rating) {
       Object.assign(monthRec(rateYm), { rating: monthDlg.rating, reflection: (monthDlg.reflection ?? monthly.months[rateYm]?.reflection ?? "").trim() });
     }
@@ -3819,14 +3930,9 @@
     if (photoYm) monthRec(photoYm).prompted = true;
     if (goalYm && photoYm) monthRec(goalYm).prompted = true;
     saveMonthly("Saved monthly check-in");
-    if (photoYm && photoFile) {
-      try {
-        const blob = await resizePhoto(photoFile);
-        await putPhoto({ month: photoYm, date: dayKey(startOfToday()), blob });
-      } catch { alert("Couldn't save the photo here. Photos need the app opened from its web address."); }
-    }
     document.getElementById("monthDialog").close();
     renderGoalLine();
+    if (photoYm && monthDlg.takePhotos !== false) openMonthlyCapture(photoYm);
   }
   function skipMonthDialog() {
     const { goalYm, photoYm } = monthDlg;
@@ -3843,56 +3949,380 @@
     openMonthDialog({ goalYm: ym, photoYm: ym, rateYm: needsRating ? prev : null });
   }
 
-  // Photos screen, oldest first, each with that month's weight.
-  async function openPhotos() {
+  // ---- Weekly physique pic ----
+  // One per weigh-in week (weeks start on the weigh-in day); any day that week counts.
+  const thisWeekKey = () => dayKey(weekOf(startOfToday()));
+  const picWeek = p => dayKey(weekOf(fromKey(p.date)));
+  const weeklyPics = () => picIndex.filter(p => p.kind === "week");
+  const hasWeekPic = wk => weeklyPics().some(p => picWeek(p) === wk);
+  // Shown on the weigh-in day until a pic is taken or skipped for the week.
+  const weeklyPicDue = () => startOfToday().getDay() === weight.weighDay && !hasWeekPic(thisWeekKey()) && !weight.picSkips?.[thisWeekKey()];
+  function weightInWeek(wk) {
+    return sortedWeights().filter(e => dayKey(weekOf(fromKey(e.date))) === wk).pop() || null;
+  }
+  function weeklyPicStreak() {
+    const weeks = new Set(weeklyPics().map(picWeek));
+    let w = weekOf(startOfToday());
+    if (!weeks.has(dayKey(w))) w = addDays(w, -7); // this week not taken yet doesn't break it
+    let n = 0;
+    while (weeks.has(dayKey(w))) { n++; w = addDays(w, -7); }
+    return n;
+  }
+  function longestWeeklyPicStreak(from = FIRST_DAY, to = "9999") {
+    const weeks = [...new Set(weeklyPics().filter(p => p.date >= from && p.date <= to).map(picWeek))].sort();
+    let best = 0, run = 0, prev = null;
+    for (const w of weeks) {
+      run = prev && daysBetween(fromKey(prev), fromKey(w)) === 7 ? run + 1 : 1;
+      best = Math.max(best, run);
+      prev = w;
+    }
+    return best;
+  }
+  function skipWeeklyPic() {
+    weight.picSkips = { ...(weight.picSkips || {}), [thisWeekKey()]: true };
+    saveWeight("Skipped this week's physique pic");
+    renderWeight();
+    if (checkinIsOpen()) renderCheckin();
+  }
+  // "Add / Skip" prompt used on the weight card and in the check-in.
+  function weeklyPicPrompt() {
+    const box = document.createElement("div");
+    box.className = "pic-prompt";
+    box.innerHTML = `<span>📸 Weekly physique pic</span>`;
+    const add = document.createElement("button");
+    add.type = "button"; add.className = "primary"; add.textContent = "Take it";
+    add.onclick = openWeeklyCapture;
+    const skip = document.createElement("button");
+    skip.type = "button"; skip.className = "link"; skip.textContent = "Skip this week";
+    skip.onclick = skipWeeklyPic;
+    box.append(add, skip);
+    return box;
+  }
+
+  // ---- Camera with ghost overlay ----
+  // Walks through one or more shots. The ghost is an earlier photo of the same shot shown
+  // faintly over the camera so the new one lines up.
+  const GHOST_KEY = "habit-tracker-ghost";
+  let cap = null; // { title, steps: [{ label, ghostId, save(blob) }], i, results, stream, facing, shot, shotUrl, ghostUrl, ghostFor }
+  const ghostOn = () => getPref(GHOST_KEY) !== "off";
+
+  function openCapture(title, steps, start = 0) {
+    cap = { title, steps, i: start, results: {}, stream: null, facing: "user", shot: null, shotUrl: null, ghostUrl: null, ghostFor: null };
+    document.getElementById("captureDialog").showModal();
+    startCamera();
+  }
+  function openMonthlyCapture(ym, startPose = null) {
+    const steps = POSES.map(([pose, label]) => {
+      // Last earlier month that has this pose.
+      const prev = picIndex.filter(p => p.kind === "month" && p.pose === pose && p.month < ym).sort((a, b) => a.month.localeCompare(b.month)).pop();
+      return {
+        label, ghostId: prev?.id,
+        done: () => picIndex.some(p => p.id === monthPicId(ym, pose)),
+        save: blob => putPic({ id: monthPicId(ym, pose), kind: "month", month: ym, pose, date: dayKey(startOfToday()), blob })
+      };
+    });
+    // Start at the pose asked for, or the first one this month doesn't have yet.
+    const first = startPose ? POSES.findIndex(p => p[0] === startPose) : Math.max(steps.findIndex(s => !s.done()), 0);
+    openCapture(`${monthLabel(ym, { month: "long", year: "numeric" })} photos`, steps, first);
+  }
+  function openWeeklyCapture() {
+    const wk = thisWeekKey();
+    const prev = weeklyPics().filter(p => picWeek(p) < wk).pop();
+    openCapture("Weekly physique pic", [{
+      label: `Week of ${shortDate(wk)}`, ghostId: prev?.id,
+      done: () => hasWeekPic(wk),
+      save: blob => putPic({ id: weekPicId(wk), kind: "week", week: wk, date: dayKey(startOfToday()), blob })
+    }]);
+  }
+
+  async function startCamera() {
+    stopCamera();
+    cap.noCamera = false;
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error();
+      cap.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: cap.facing, width: { ideal: 1920 }, height: { ideal: 1920 } }, audio: false });
+    } catch { cap.stream = null; cap.noCamera = true; }
+    renderCapture();
+  }
+  function stopCamera() {
+    cap?.stream?.getTracks().forEach(t => t.stop());
+    if (cap) cap.stream = null;
+  }
+  function closeCapture() {
+    stopCamera();
+    for (const u of [cap?.shotUrl, cap?.ghostUrl]) if (u) URL.revokeObjectURL(u);
+    cap = null;
+    const dlg = document.getElementById("captureDialog");
+    if (dlg.open) dlg.close();
+    refreshPicIndex();
+    if (document.getElementById("photosDialog").open) renderPhotos();
+  }
+  function setShot(blob) {
+    if (cap.shotUrl) URL.revokeObjectURL(cap.shotUrl);
+    cap.shot = blob;
+    cap.shotUrl = blob ? URL.createObjectURL(blob) : null;
+    renderCapture();
+  }
+  function takeFrame() {
+    const v = document.querySelector("#captureBody video");
+    if (!v || !v.videoWidth) return;
+    const c = document.createElement("canvas");
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    const ctx = c.getContext("2d");
+    // The selfie camera is shown mirrored, so save it the way it looked.
+    if (cap.facing === "user") { ctx.translate(c.width, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(v, 0, 0);
+    c.toBlob(b => setShot(b), "image/jpeg", 0.9);
+  }
+  async function useShot() {
+    const step = cap.steps[cap.i];
+    try { await step.save(await resizePhoto(cap.shot)); }
+    catch { alert("Couldn't save the photo here. Photos need the app opened from its web address."); return; }
+    cap.results[cap.i] = "saved";
+    nextStep();
+  }
+  function nextStep() {
+    setShotSilently(null);
+    cap.i++;
+    renderCapture();
+  }
+  function setShotSilently(blob) {
+    if (cap.shotUrl) URL.revokeObjectURL(cap.shotUrl);
+    cap.shot = blob; cap.shotUrl = null;
+  }
+
+  async function renderCapture() {
+    if (!cap) return;
+    const body = document.getElementById("captureBody");
+    document.getElementById("captureTitle").textContent = cap.title;
+    const steps = cap.steps, many = steps.length > 1;
+    body.innerHTML = "";
+    // Summary after the last shot: retake any of them.
+    if (cap.i >= steps.length) {
+      stopCamera();
+      document.getElementById("captureProgress").textContent = many ? `${Object.values(cap.results).filter(r => r === "saved").length}/${steps.length} saved` : "";
+      const list = document.createElement("div");
+      list.className = "cap-summary";
+      steps.forEach((s, i) => {
+        const row = document.createElement("div");
+        const state = cap.results[i] === "saved" || (!cap.results[i] && s.done()) ? "✓" : cap.results[i] === "skipped" ? "Skipped" : "—";
+        row.innerHTML = `<span>${esc(s.label)}</span><small>${state}</small>`;
+        const again = document.createElement("button");
+        again.type = "button"; again.className = "link"; again.textContent = state === "✓" ? "Retake" : "Take";
+        again.onclick = () => { cap.i = i; startCamera(); };
+        row.append(again);
+        list.append(row);
+      });
+      const done = document.createElement("button");
+      done.type = "button"; done.className = "primary"; done.textContent = "Done";
+      done.onclick = closeCapture;
+      body.append(list, done);
+      return;
+    }
+    const step = steps[cap.i];
+    document.getElementById("captureProgress").textContent = many ? `${cap.i + 1}/${steps.length} · ${step.label}` : step.label;
+
+    // Ghost toggle
+    const tg = document.createElement("label");
+    tg.className = "ghost-toggle";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = ghostOn();
+    cb.onchange = () => { setPref(GHOST_KEY, cb.checked ? "on" : "off"); renderCapture(); };
+    tg.append(cb, step.ghostId ? " Show last photo as a guide" : " Show last photo as a guide (none yet for this one)");
+    body.append(tg);
+
+    // Stage: live camera or the photo just taken, with the faint ghost on top.
+    const stage = document.createElement("div");
+    stage.className = "cap-stage";
+    if (cap.shotUrl) {
+      const img = document.createElement("img");
+      img.src = cap.shotUrl; img.alt = "Photo just taken";
+      stage.append(img);
+    } else if (cap.stream) {
+      const v = document.createElement("video");
+      v.autoplay = true; v.playsInline = true; v.muted = true;
+      v.srcObject = cap.stream;
+      if (cap.facing === "user") v.classList.add("mirror");
+      stage.append(v);
+    } else {
+      stage.insertAdjacentHTML("beforeend", `<p class="cap-msg">${cap.noCamera ? "Camera not available here — choose a photo instead." : "Starting camera…"}</p>`);
+    }
+    if (ghostOn() && step.ghostId) {
+      if (cap.ghostFor !== step.ghostId) {
+        if (cap.ghostUrl) URL.revokeObjectURL(cap.ghostUrl);
+        const g = await getPic(step.ghostId).catch(() => null);
+        if (!cap) return;
+        cap.ghostUrl = g ? URL.createObjectURL(g.blob) : null;
+        cap.ghostFor = step.ghostId;
+      }
+      if (cap.ghostUrl) {
+        const gi = document.createElement("img");
+        gi.className = "ghost"; gi.src = cap.ghostUrl; gi.alt = "";
+        stage.append(gi);
+      }
+    }
+    body.append(stage);
+
+    // Buttons
+    const row = document.createElement("div");
+    row.className = "cap-btns";
+    const btn = (text, fn, cls = "") => { const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.className = cls; b.onclick = fn; row.append(b); return b; };
+    if (cap.shot) {
+      btn("↺ Retake", () => setShot(null));
+      btn("✓ Use photo", useShot, "primary");
+    } else {
+      if (cap.stream) btn("📸 Take photo", takeFrame, "primary");
+      const pick = document.createElement("label");
+      pick.className = "cap-pick";
+      pick.innerHTML = `<input type="file" accept="image/*" hidden>🖼️ Choose photo`;
+      pick.querySelector("input").onchange = e => { if (e.target.files[0]) setShot(e.target.files[0]); };
+      row.append(pick);
+      if (cap.stream) btn("🔄 Flip", () => { cap.facing = cap.facing === "user" ? "environment" : "user"; startCamera(); });
+      btn(many ? "Skip pose" : "Skip", () => { cap.results[cap.i] = "skipped"; nextStep(); }, "link");
+    }
+    body.append(row);
+  }
+
+  // ---- Photos screen: monthly sets, weekly pics, compare ----
+  const photoView = { tab: "monthly", what: "front", a: null, b: null, urls: [] };
+  function picUrl(blob) { const u = URL.createObjectURL(blob); photoView.urls.push(u); return u; }
+  function openPhotos(tab) {
+    if (tab) photoView.tab = tab;
     const dlg = document.getElementById("photosDialog");
-    const body = document.getElementById("photosBody");
-    body.innerHTML = `<p class="hint">Loading…</p>`;
     if (!dlg.open) dlg.showModal();
-    let photos;
-    try { photos = await getPhotos(); }
+    renderPhotos();
+  }
+  async function renderPhotos() {
+    for (const u of photoView.urls) URL.revokeObjectURL(u);
+    photoView.urls = [];
+    document.querySelectorAll("#photoTabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === photoView.tab));
+    const body = document.getElementById("photosBody");
+    let pics;
+    try { pics = await getPics(); }
     catch { body.innerHTML = `<p class="hint">Photos need the app opened from its web address (or installed) — this view can't store them.</p>`; return; }
     body.innerHTML = "";
-    const ym = dayKey(startOfToday()).slice(0, 7);
-    const add = document.createElement("label");
-    add.className = "photo-pick";
-    add.innerHTML = `<input type="file" accept="image/*" hidden><span>📸 ${photos.some(p => p.month === ym) ? "Replace" : "Add"} ${monthLabel(ym, { month: "long" })}'s photo</span>`;
-    add.querySelector("input").onchange = async e => {
-      const f = e.target.files[0];
-      if (!f) return;
-      try { await putPhoto({ month: ym, date: dayKey(startOfToday()), blob: await resizePhoto(f) }); }
-      catch { alert("Couldn't save the photo here."); }
-      openPhotos();
-    };
-    body.append(add);
-    if (!photos.length) { body.insertAdjacentHTML("beforeend", `<p class="hint">No photos yet.</p>`); return; }
-    const grid = document.createElement("div");
-    grid.className = "photo-grid";
-    for (const p of photos) {
-      const fig = document.createElement("figure");
+    const fig = (p, caption) => {
+      const f = document.createElement("figure");
       const img = document.createElement("img");
-      img.src = URL.createObjectURL(p.blob);
-      img.alt = `Progress photo, ${monthLabel(p.month, { month: "long", year: "numeric" })}`;
-      img.onclick = () => fig.classList.toggle("big");
-      const cap = document.createElement("figcaption");
-      const w = weightInMonth(p.month);
-      cap.innerHTML = `<b>${monthLabel(p.month, { month: "short", year: "numeric" })}</b>${w ? ` · ${lbs(w.lbs)}` : ""}`;
-      const del = document.createElement("button");
-      del.type = "button"; del.className = "link danger"; del.textContent = "Delete";
-      del.onclick = async () => {
-        if (!confirm(`Delete the ${monthLabel(p.month, { month: "long", year: "numeric" })} photo? This can't be undone.`)) return;
-        await deletePhoto(p.month); openPhotos();
-      };
-      cap.append(" ", del);
-      fig.append(img, cap);
-      grid.append(fig);
+      img.src = picUrl(p.blob);
+      img.alt = caption;
+      img.onclick = () => showPic(p, caption);
+      const c = document.createElement("figcaption");
+      c.innerHTML = caption;
+      f.append(img, c);
+      return f;
+    };
+    const wTxt = w => w ? ` · ${lbs(w.lbs)}` : "";
+
+    if (photoView.tab === "monthly") {
+      const ym = dayKey(startOfToday()).slice(0, 7);
+      const go = document.createElement("button");
+      go.type = "button"; go.className = "primary"; go.style.width = "100%";
+      go.textContent = `📸 Take ${monthLabel(ym, { month: "long" })}'s photos`;
+      go.onclick = () => openMonthlyCapture(ym);
+      body.append(go);
+      const months = [...new Set([ym, ...pics.filter(p => p.kind === "month").map(p => p.month)])].sort().reverse();
+      for (const m of months) {
+        const sec = document.createElement("section");
+        sec.className = "pic-month";
+        sec.innerHTML = `<h3>${monthLabel(m, { month: "long", year: "numeric" })}<small>${wTxt(weightInMonth(m))}</small></h3>`;
+        const row = document.createElement("div");
+        row.className = "pose-row";
+        for (const [pose, label] of POSES) {
+          const p = pics.find(x => x.id === monthPicId(m, pose));
+          if (p) row.append(fig(p, label));
+          else {
+            const add = document.createElement("button");
+            add.type = "button"; add.className = "pose-add";
+            add.innerHTML = `<span>+</span><small>${label}</small>`;
+            add.onclick = () => openMonthlyCapture(m, pose);
+            row.append(add);
+          }
+        }
+        sec.append(row);
+        body.append(sec);
+      }
+    } else if (photoView.tab === "weekly") {
+      const wk = thisWeekKey();
+      const go = document.createElement("button");
+      go.type = "button"; go.className = "primary"; go.style.width = "100%";
+      go.textContent = hasWeekPic(wk) ? "📸 Retake this week's pic" : "📸 Take this week's pic";
+      go.onclick = openWeeklyCapture;
+      const n = weeklyPicStreak();
+      body.append(go);
+      body.insertAdjacentHTML("beforeend", `<p class="hint">🔥 ${n} week${n === 1 ? "" : "s"} in a row · longest ${longestWeeklyPicStreak()} · weeks start on ${WEEKDAYS[weight.weighDay]}</p>`);
+      const grid = document.createElement("div");
+      grid.className = "photo-grid";
+      for (const p of pics.filter(x => x.kind === "week")) grid.append(fig(p, `<b>${shortDate(p.date)}</b>${wTxt(weightInWeek(picWeek(p)))}`));
+      if (!grid.children.length) body.insertAdjacentHTML("beforeend", `<p class="hint">No weekly pics yet.</p>`);
+      body.append(grid);
+    } else {
+      renderCompare(body, pics, fig);
     }
-    body.append(grid);
+  }
+
+  // Two photos of the same pose (or two weekly pics) side by side with the weight change.
+  function renderCompare(body, pics, fig) {
+    const ctl = document.createElement("div");
+    ctl.className = "rate-row";
+    const what = document.createElement("select");
+    for (const [pose, label] of POSES) what.append(new Option(label, pose));
+    what.append(new Option("Weekly pics", "week"));
+    what.value = photoView.what;
+    what.onchange = () => { photoView.what = what.value; photoView.a = photoView.b = null; renderPhotos(); };
+    ctl.append(what);
+    body.append(ctl);
+    const weekly = photoView.what === "week";
+    const list = pics.filter(p => weekly ? p.kind === "week" : p.kind === "month" && p.pose === photoView.what)
+      .sort((x, y) => (weekly ? x.date.localeCompare(y.date) : x.month.localeCompare(y.month)));
+    if (list.length < 2) { body.insertAdjacentHTML("beforeend", `<p class="hint">You need at least two ${weekly ? "weekly pics" : `“${poseName(photoView.what)}” photos`} to compare.</p>`); return; }
+    const label = p => weekly ? shortDate(p.date) + `, ${fromKey(p.date).getFullYear()}` : monthLabel(p.month, { month: "short", year: "numeric" });
+    // Default: first vs latest.
+    const a = list.find(p => p.id === photoView.a) || list[0];
+    const b = list.find(p => p.id === photoView.b) || list[list.length - 1];
+    for (const [key, cur] of [["a", a], ["b", b]]) {
+      const sel = document.createElement("select");
+      for (const p of list) sel.append(new Option(label(p), p.id));
+      sel.value = cur.id;
+      sel.onchange = () => { photoView[key] = sel.value; renderPhotos(); };
+      ctl.append(sel);
+    }
+    const wOf = p => weekly ? weightInWeek(picWeek(p)) : weightInMonth(p.month);
+    const wa = wOf(a), wb = wOf(b);
+    const pair = document.createElement("div");
+    pair.className = "pic-pair";
+    pair.append(fig(a, `<b>${label(a)}</b>${wa ? ` · ${lbs(wa.lbs)}` : ""}`), fig(b, `<b>${label(b)}</b>${wb ? ` · ${lbs(wb.lbs)}` : ""}`));
+    body.append(pair);
+    if (wa && wb) body.insertAdjacentHTML("beforeend", `<p class="pic-change">${changeHtml(wb.lbs - wa.lbs, wa.lbs)} between them</p>`);
+  }
+
+  // Full-size view with delete.
+  function showPic(p, caption) {
+    const v = document.getElementById("picViewer");
+    v.innerHTML = "";
+    const img = document.createElement("img");
+    img.src = picUrl(p.blob); img.alt = "";
+    const bar = document.createElement("div");
+    bar.className = "pic-viewer-bar";
+    const text = document.createElement("span");
+    text.innerHTML = `${p.kind === "month" ? `${monthLabel(p.month, { month: "long", year: "numeric" })} · ` : ""}${caption}`;
+    const del = document.createElement("button");
+    del.type = "button"; del.className = "link danger"; del.textContent = "Delete";
+    del.onclick = async () => {
+      if (!confirm("Delete this photo? This can't be undone.")) return;
+      await deletePic(p.id); v.hidden = true; renderPhotos();
+    };
+    const close = document.createElement("button");
+    close.type = "button"; close.textContent = "Close";
+    close.onclick = () => { v.hidden = true; };
+    bar.append(text, del, close);
+    v.append(img, bar);
+    v.hidden = false;
   }
 
   // ---- Look back ----
   // A read-only summary of any date range, built entirely from the data above.
-  const lbView = { range: "3m", from: null, to: null };
+  const lbView = { range: "3m", from: null, to: null, pose: "front" };
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const monthsBetween = (fromYm, toYm) => { const out = []; for (let m = fromYm; m <= toYm; m = addMonths(m, 1)) out.push(m); return out; };
   function eachDay(from, to, fn) { for (let d = fromKey(from); dayKey(d) <= to; d = addDays(d, 1)) fn(dayKey(d), d); }
@@ -4203,14 +4633,33 @@
 
     // Photos load from IndexedDB after the rest is on screen.
     try {
-      const photos = (await getPhotos()).filter(p => p.month >= from.slice(0, 7) && p.month <= to.slice(0, 7));
+      const all = await getPics();
       const box = document.getElementById("lbPhotos");
-      if (box && photos.length) {
-        const img = p => `<figure><img src="${URL.createObjectURL(p.blob)}" alt="Progress photo ${esc(monthLabel(p.month, { month: "long", year: "numeric" }))}"><figcaption>${monthLabel(p.month, { month: "short", year: "numeric" })}${weightInMonth(p.month) ? ` · ${lbs(weightInMonth(p.month).lbs)}` : ""}</figcaption></figure>`;
-        const first = photos[0], last = photos[photos.length - 1];
-        box.innerHTML = `<h4>📸 Progress photos</h4>
-          ${photos.length > 1 ? `<div class="lb-photo-pair">${img(first)}${img(last)}</div>` : ""}
-          <div class="lb-photo-row">${photos.map(img).join("")}</div>`;
+      const monthPics = all.filter(p => p.kind === "month" && p.month >= from.slice(0, 7) && p.month <= to.slice(0, 7));
+      const weekPics = all.filter(p => p.kind === "week" && p.date >= from && p.date <= to);
+      if (box && (monthPics.length || weekPics.length)) {
+        const img = (p, cap) => `<figure><img src="${URL.createObjectURL(p.blob)}" alt="${esc(cap)}"><figcaption>${cap}</figcaption></figure>`;
+        const mCap = p => `${monthLabel(p.month, { month: "short", year: "numeric" })}${weightInMonth(p.month) ? ` · ${lbs(weightInMonth(p.month).lbs)}` : ""}`;
+        let html = `<h4>📸 Progress photos</h4>`;
+        // First vs latest for each pose.
+        for (const [pose, label] of POSES) {
+          const list = monthPics.filter(p => p.pose === pose).sort((a, b) => a.month.localeCompare(b.month));
+          if (list.length > 1) html += `<div class="lb-pose"><b>${label}</b><div class="lb-photo-pair">${img(list[0], mCap(list[0]))}${img(list[list.length - 1], mCap(list[list.length - 1]))}</div></div>`;
+          else if (list.length) html += `<div class="lb-pose"><b>${label}</b><div class="lb-photo-pair">${img(list[0], mCap(list[0]))}</div></div>`;
+        }
+        // Every month for one pose.
+        const poses = POSES.filter(([pose]) => monthPics.some(p => p.pose === pose));
+        if (poses.length) {
+          if (!poses.some(([p]) => p === lbView.pose)) lbView.pose = poses[0][0];
+          html += `<div class="tabs lb-pose-tabs">${poses.map(([pose, label]) => `<button type="button" data-pose="${pose}" class="${pose === lbView.pose ? "on" : ""}">${label}</button>`).join("")}</div>
+            <div class="lb-photo-row">${monthPics.filter(p => p.pose === lbView.pose).sort((a, b) => a.month.localeCompare(b.month)).map(p => img(p, mCap(p))).join("")}</div>`;
+        }
+        if (weekPics.length) {
+          const weeks = new Set(weekPics.map(picWeek)).size;
+          html += `<div class="lb-tiles" style="margin-top:12px">${tile(weeks, "weekly physique pics")}${tile(`${longestWeeklyPicStreak(from, to)} wk`, "longest weekly pic streak")}</div>`;
+        }
+        box.innerHTML = html;
+        box.querySelectorAll(".lb-pose-tabs button").forEach(b => b.onclick = () => { lbView.pose = b.dataset.pose; renderLookback(); });
       }
     } catch {}
   }
@@ -4244,7 +4693,7 @@
   // ---- Updates ----
   // Bump APP_VERSION with every deploy. An open app checks the live copy now and then,
   // and offers a refresh when the version there is newer.
-  const APP_VERSION = "2026.11.02-5";
+  const APP_VERSION = "2026.11.02-6";
   async function checkForUpdate() {
     if (!location.protocol.startsWith("http") || !navigator.onLine) return;
     try {
@@ -4453,26 +4902,44 @@
     }
   }
 
-  // Photos: one file per month; the newer photo for a month wins. Deleting a photo only
-  // removes it from this device (it would come back from Drive), so delete on each device.
+  // Photos: one Drive file per photo slot ("pic_m_2026-11_front_<date>.jpg", "pic_w_<week>_<date>.jpg");
+  // the newer photo for a slot wins. Older single monthly photos ("photo-YYYY-MM_<date>.jpg")
+  // count as that month's "Front, relaxed". Deleting a photo only removes it from this device
+  // (it would come back from Drive), so delete it on each device.
+  const picFileName = p => `pic_${p.id.replace(/:/g, "_")}_${p.date}.jpg`;
+  function parsePicFile(name) {
+    let m = name.match(/^pic_m_(\d{4}-\d{2})_([a-z]+)_(\d{4}-\d{2}-\d{2})\.jpg$/);
+    if (m) return { id: monthPicId(m[1], m[2]), kind: "month", month: m[1], pose: m[2], date: m[3] };
+    m = name.match(/^pic_w_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.jpg$/);
+    if (m) return { id: weekPicId(m[1]), kind: "week", week: m[1], date: m[2] };
+    m = name.match(/^photo-(\d{4}-\d{2})_(\d{4}-\d{2}-\d{2})\.jpg$/);
+    if (m) return { id: monthPicId(m[1], "front"), kind: "month", month: m[1], pose: "front", date: m[2] };
+    return null;
+  }
   async function syncPhotos() {
     let local;
-    try { local = await getPhotos(); } catch { return; } // no IndexedDB here
+    try { local = await getPics(); } catch { return; } // no IndexedDB here
     const remote = {};
-    for (const f of await driveList("name contains 'photo-'")) {
-      const m = f.name.match(/^photo-(\d{4}-\d{2})_(\d{4}-\d{2}-\d{2})\.jpg$/);
-      if (m && (!remote[m[1]] || remote[m[1]].date < m[2])) remote[m[1]] = { id: f.id, date: m[2], old: remote[m[1]] };
+    for (const f of [...await driveList("name contains 'pic_'"), ...await driveList("name contains 'photo-'")]) {
+      const info = parsePicFile(f.name);
+      if (!info) continue;
+      const cur = remote[info.id];
+      if (!cur || cur.date < info.date) remote[info.id] = { ...info, fileId: f.id, older: cur ? [...cur.older, cur.fileId] : [] };
+      else cur.older.push(f.id);
     }
     for (const p of local) {
-      const r = remote[p.month];
+      const r = remote[p.id];
       if (!r || r.date < p.date) {
-        await driveCreate(`photo-${p.month}_${p.date}.jpg`, p.blob, "image/jpeg");
-        if (r) await driveDelete(r.id).catch(() => {});
+        await driveCreate(picFileName(p), p.blob, "image/jpeg");
+        for (const old of r ? [r.fileId, ...r.older] : []) await driveDelete(old).catch(() => {});
       }
     }
-    for (const [month, r] of Object.entries(remote)) {
-      const l = local.find(p => p.month === month);
-      if (!l || l.date < r.date) await putPhoto({ month, date: r.date, blob: await (await driveDownload(r.id)).blob() });
+    for (const r of Object.values(remote)) {
+      const l = local.find(p => p.id === r.id);
+      if (!l || l.date < r.date) {
+        const { fileId, older, ...info } = r;
+        await putPic({ ...info, blob: await (await driveDownload(fileId)).blob() });
+      }
     }
   }
 
@@ -4577,8 +5044,9 @@
   async function exportData(withPhotos = true) {
     const data = { habits, work, spending, weight, trading, monthly };
     if (withPhotos) {
-      try { data.photos = await Promise.all((await getPhotos()).map(async p => ({ month: p.month, date: p.date, data: await blobToDataUrl(p.blob) }))); }
-      catch { data.photos = []; }
+      try {
+        data.photos = await Promise.all((await getPics()).map(async ({ blob, ...p }) => ({ ...p, data: await blobToDataUrl(blob) })));
+      } catch { data.photos = []; }
     }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -4589,10 +5057,15 @@
     setPref(LAST_EXPORT_KEY, dayKey(startOfToday()));
     renderBackupBanner();
   }
+  const sizeText = bytes => bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   document.getElementById("exportBtn").onclick = async () => {
-    let n = 0;
-    try { n = (await getPhotos()).length; } catch {}
+    // Rough file sizes: the data as saved, plus photos at about 4/3 their size once stored as text.
+    const base = new Blob([JSON.stringify({ habits, work, spending, weight, trading, monthly }, null, 2)]).size;
+    let n = 0, bytes = 0;
+    try { const pics = await getPics(); n = pics.length; bytes = pics.reduce((s, p) => s + (p.blob?.size || 0), 0); } catch {}
     document.getElementById("exportPhotoCount").textContent = n ? `${n} photo${n === 1 ? "" : "s"}` : "no photos yet";
+    document.getElementById("exportAllSize").textContent = `≈ ${sizeText(base + Math.ceil(bytes * 4 / 3) + n * 200)}`;
+    document.getElementById("exportLiteSize").textContent = `≈ ${sizeText(base)}`;
     document.getElementById("exportDialog").showModal();
   };
   document.getElementById("exportAll").onclick = () => { document.getElementById("exportDialog").close(); exportData(true); };
@@ -4719,8 +5192,13 @@
         if (imported.monthly) { monthly = normalizeMonthly(imported.monthly); saveMonthly("Imported backup", "import"); renderGoalLine(); }
         if (Array.isArray(imported.photos)) {
           try {
-            await clearPhotos();
-            for (const ph of imported.photos) await putPhoto({ month: ph.month, date: ph.date, blob: await dataUrlToBlob(ph.data) });
+            await clearPics();
+            for (const ph of imported.photos) {
+              const blob = await dataUrlToBlob(ph.data);
+              // Older backups had one photo per month: it becomes that month's "Front, relaxed".
+              if (ph.id) { const { data, ...p } = ph; await putPic({ ...p, blob }); }
+              else await putPic({ id: monthPicId(ph.month, "front"), kind: "month", month: ph.month, pose: "front", date: ph.date, blob });
+            }
           } catch { alert("Your data was imported, but the photos couldn't be saved in this browser view."); }
         }
       }
@@ -4916,7 +5394,11 @@
   document.getElementById("monthSkip").onclick = document.getElementById("monthClose").onclick = skipMonthDialog;
   monthDialog.oncancel = e => { e.preventDefault(); skipMonthDialog(); };
   const photosDialog = document.getElementById("photosDialog");
-  document.getElementById("photosBtn").onclick = openPhotos;
+  document.getElementById("photosBtn").onclick = () => openPhotos();
+  document.querySelectorAll("#photoTabs button").forEach(b => b.onclick = () => { photoView.tab = b.dataset.tab; renderPhotos(); });
+  document.getElementById("captureClose").onclick = closeCapture;
+  document.getElementById("captureDialog").oncancel = e => { e.preventDefault(); closeCapture(); };
+  refreshPicIndex();
   document.getElementById("photosClose").onclick = () => photosDialog.close();
   photosDialog.onclick = e => { if (e.target === photosDialog) photosDialog.close(); };
 
