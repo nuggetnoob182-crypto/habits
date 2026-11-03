@@ -674,7 +674,8 @@
       { name: "Stopped at loss limit", color: "#06b6d4", question: "Stopped at my loss limit?", good: "yes", trading: true },
       { name: "No revenge trades", color: "#6366f1", question: "No revenge trades?", good: "yes", trading: true },
       // Meals: done[key] counts meals eaten that day (goal 3); mealsEaten[key] lists which.
-      { name: "Meals", color: "#f43f5e", mealsHabit: true, target: 3 }
+      { name: "Meals", color: "#f43f5e", mealsHabit: true, target: 3 },
+      { name: "Physical focus", color: "#d946ef", question: "Physical focus", good: "yes" }
     ].map((h, i) => ({ id: `default-${i}`, ...h, created, done: {} }));
   }
 
@@ -4089,7 +4090,7 @@
       const qTiles = qs.map(h => {
         let good = 0, answered = 0;
         eachDay(from, to, k => { const a = answerOf(h, k); if (a) { answered++; if (a === h.good) good++; } });
-        return tile(good, `days ${esc(h.name.replace(/^No /, "without ").toLowerCase())}`, answered ? `${Math.round(good / answered * 100)}% of ${answered} answered` : "none answered");
+        return tile(good, h.good === "no" ? `days ${esc(h.name.replace(/^No /, "without ").toLowerCase())}` : `days of ${esc(h.name.toLowerCase())}`, answered ? `${Math.round(good / answered * 100)}% of ${answered} answered` : "none answered");
       }).join("");
       const eatBars = months.map(m => ({ label: monthLabel(m, { month: "narrow" }), title: monthLabel(m, { month: "long", year: "numeric" }), v: categoryTotals(`${m}-01`, `${m}-31`).Food || 0 }));
       parts.push(card("Questions", `<div class="lb-tiles">${qTiles}</div>
@@ -4243,7 +4244,7 @@
   // ---- Updates ----
   // Bump APP_VERSION with every deploy. An open app checks the live copy now and then,
   // and offers a refresh when the version there is newer.
-  const APP_VERSION = "2026.11.02-4";
+  const APP_VERSION = "2026.11.02-5";
   async function checkForUpdate() {
     if (!location.protocol.startsWith("http") || !navigator.onLine) return;
     try {
