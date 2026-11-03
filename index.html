@@ -729,9 +729,11 @@
       { name: "No revenge trades", color: "#6366f1", question: "No revenge trades?", good: "yes", trading: true },
       // Meals: done[key] counts meals eaten that day (goal 3); mealsEaten[key] lists which.
       { name: "Meals", color: "#f43f5e", mealsHabit: true, target: 3 },
-      // Prayers: morning + night; the day is checked off when both are done.
-      { name: "Prayers", color: "#ca8a04", prayers: true, target: 2 },
-      { name: "Physical focus", color: "#d946ef", question: "Physical focus", good: "yes" }
+      { name: "Physical focus", color: "#d946ef", question: "Physical focus", good: "yes" },
+      // Morning and night prayers each keep their own streak.
+      { name: "Morning prayer", color: "#ca8a04" },
+      { name: "Night prayer", color: "#4338ca" }
+      // Add new starters only at the end: a starter's id is its position (default-N).
     ].map((h, i) => ({ id: `default-${i}`, ...h, created, done: {} }));
   }
 
@@ -766,6 +768,7 @@
         if (h[k] === undefined) h[k] = v;
       }
     }
+    data = fixStarters(data);
     // Add starter habits introduced after this save was created.
     for (const h of defaults.slice(seeded)) {
       if (!data.some(x => x.id === h.id)) data.push(h);
@@ -776,6 +779,46 @@
   // Load habits only after the starter definitions above are ready.
   let habits = load();
 
+  // Repairs two short-lived mix-ups in the starter habits (Nov 2026):
+  //  - Prayers was briefly one habit with Morning/Night parts. It's now two habits with their
+  //    own streaks: default-15 "Morning prayer" and default-16 "Night prayer".
+  //  - That version put Prayers ahead of Physical focus in the starter list, so existing saves
+  //    got a second "Physical focus" (default-15) and no Prayers. The copies are merged back
+  //    into one Physical focus (default-14), keeping anything logged on either.
+  // Runs on load, after sync and on import, so an older copy from anywhere gets fixed too.
+  function fixStarters(list) {
+    let out = [...list];
+    let addMorning = false;
+    const pfs = out.filter(h => h.question === "Physical focus");
+    if (pfs.length) {
+      const keep = pfs.find(h => h.id === "default-14") || pfs[0];
+      for (const d of pfs) {
+        if (d === keep) continue;
+        for (const f of ["done", "answers", "notes", "excused"]) if (d[f]) keep[f] = { ...d[f], ...(keep[f] || {}) };
+        if (d.id === "default-15") addMorning = true;
+      }
+      out = out.filter(h => !pfs.includes(h) || h === keep);
+      const clash = out.find(h => h.id === "default-14" && h !== keep);
+      if (keep.id !== "default-14" && (!clash || clash.prayers)) keep.id = "default-14";
+    }
+    const i = out.findIndex(h => h.prayers);
+    if (i >= 0) {
+      const old = out[i];
+      const parts = old.partsDone || {};
+      const pick = which => Object.fromEntries(Object.entries(parts).filter(([, v]) => v.includes(which)).map(([k]) => [k, true]));
+      const morning = { ...old, id: "default-15", name: old.name === "Prayers" ? "Morning prayer" : old.name, done: pick("morning") };
+      delete morning.prayers; delete morning.partsDone; delete morning.target;
+      out[i] = morning;
+      const night = out.find(h => h.id === "default-16");
+      if (night) Object.assign(night.done, pick("night"));
+      else out.splice(i + 1, 0, { id: "default-16", name: "Night prayer", color: "#4338ca", created: old.created, done: pick("night"),
+        ...(old.excused ? { excused: { ...old.excused } } : {}) });
+    } else if (addMorning && !out.some(h => h.id === "default-15")) {
+      const at = out.findIndex(h => h.id === "default-14");
+      out.splice(at + 1, 0, { id: "default-15", name: "Morning prayer", color: "#ca8a04", created: dayKey(startOfToday()), done: {} });
+    }
+    return out;
+  }
   // Every data change goes through a save*(label, mergeKey) call, which also offers Undo.
   function save(label, mergeKey) {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(habits)); } catch {}
@@ -1021,11 +1064,10 @@
     return `📱 ${today !== undefined ? `Today: <b>${duration(today)}</b> of ${duration(h.limit)} · ` : ""}7-day average: <b>${duration(avg)}</b>`;
   }
 
-  // ---- Habits made of parts: Meals (breakfast, lunch, dinner), Prayers (morning, night) ----
+  // ---- Habits made of parts: Meals (breakfast, lunch, dinner) ----
   // done[key] counts the parts done that day; the day is checked off when all are done.
   const MEALS = [["breakfast", "Breakfast", "🍳"], ["lunch", "Lunch", "🥪"], ["dinner", "Dinner", "🍽️"]];
-  const PRAYERS = [["morning", "Morning", "🌅"], ["night", "Night", "🌙"]];
-  const partsOf = h => h.mealsHabit ? MEALS : h.prayers ? PRAYERS : null;
+  const partsOf = h => h.mealsHabit ? MEALS : null;
   // Meals keep their parts in mealsEaten (its original name); other habits use partsDone.
   const partsField = h => h.mealsHabit ? "mealsEaten" : "partsDone";
   const partsOn = (h, key) => h[partsField(h)]?.[key] || [];
@@ -2284,7 +2326,7 @@
           : h.water ? "Tap a day to set its amount, or press and hold a day to take off one glass."
           : h.question ? "Tap a day to answer it. Unanswered days stay blank until you do."
           : h.mealsHabit ? "Tap a meal to mark it eaten. Tap a day above to fill in a past day."
-          : h.prayers ? "Tap Morning or Night when you've prayed. Tap a day above to fill in a past day."
+
           : "Tap a day to check it off, or “Log workout” to record what you did.";
         el.append(hint);
       }
@@ -2296,7 +2338,7 @@
         : h.water ? waterLine(h)
         : h.eatingOut ? eatingOutLine()
         : h.mealsHabit ? mealsLine(h)
-        : h.prayers ? `🙏 Today: <b>${count(h, todayKey)}/2 prayers</b>${partsOn(h, todayKey).length === 1 ? ` · ${partsOn(h, todayKey)[0] === "morning" ? "night" : "morning"} still to go` : ""}`
+
         : h.workout ? workoutLine(h) : "";
       if (info) {
         const line = document.createElement("div");
@@ -4707,7 +4749,7 @@
   // ---- Updates ----
   // Bump APP_VERSION with every deploy. An open app checks the live copy now and then,
   // and offers a refresh when the version there is newer.
-  const APP_VERSION = "2026.11.02-7";
+  const APP_VERSION = "2026.11.02-9";
   async function checkForUpdate() {
     if (!location.protocol.startsWith("http") || !navigator.onLine) return;
     try {
@@ -4801,7 +4843,7 @@
 
   // Replaces local data with the merged copy (no Undo, no change stamps — it came from sync).
   function applyMerged(m) {
-    habits = (m.habits || []).map(h => ({ ...h, done: h.done || {} }));
+    habits = fixStarters((m.habits || []).map(h => ({ ...h, done: h.done || {} })));
     work = { rates: [], hours: {}, ...(m.work || {}) };
     spending = normalizeSpending(m.spending);
     weight = { weighDay: 1, goal: null, entries: [], ...(m.weight || {}) };
@@ -5198,7 +5240,7 @@
         "\n\nContinue?";
       if (confirm(msg)) {
         // One Undo covers the whole import.
-        habits = imported.habits; save("Imported backup", "import"); render();
+        habits = fixStarters(imported.habits); save("Imported backup", "import"); render();
         if (imported.work) { work = imported.work; saveWork("Imported backup", "import"); renderWork(); }
         if (imported.spending) { spending = normalizeSpending(imported.spending); saveSpending("Imported backup", "import"); renderSpending(); }
         if (imported.weight) { weight = { weighDay: 1, goal: null, entries: [], ...imported.weight }; saveWeight("Imported backup", "import"); renderWeight(); }
