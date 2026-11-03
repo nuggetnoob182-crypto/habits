@@ -729,6 +729,8 @@
       { name: "No revenge trades", color: "#6366f1", question: "No revenge trades?", good: "yes", trading: true },
       // Meals: done[key] counts meals eaten that day (goal 3); mealsEaten[key] lists which.
       { name: "Meals", color: "#f43f5e", mealsHabit: true, target: 3 },
+      // Prayers: morning + night; the day is checked off when both are done.
+      { name: "Prayers", color: "#ca8a04", prayers: true, target: 2 },
       { name: "Physical focus", color: "#d946ef", question: "Physical focus", good: "yes" }
     ].map((h, i) => ({ id: `default-${i}`, ...h, created, done: {} }));
   }
@@ -1019,30 +1021,40 @@
     return `📱 ${today !== undefined ? `Today: <b>${duration(today)}</b> of ${duration(h.limit)} · ` : ""}7-day average: <b>${duration(avg)}</b>`;
   }
 
-  // ---- Meals ----
+  // ---- Habits made of parts: Meals (breakfast, lunch, dinner), Prayers (morning, night) ----
+  // done[key] counts the parts done that day; the day is checked off when all are done.
   const MEALS = [["breakfast", "Breakfast", "🍳"], ["lunch", "Lunch", "🥪"], ["dinner", "Dinner", "🍽️"]];
-  const mealsOn = (h, key) => h.mealsEaten?.[key] || [];
+  const PRAYERS = [["morning", "Morning", "🌅"], ["night", "Night", "🌙"]];
+  const partsOf = h => h.mealsHabit ? MEALS : h.prayers ? PRAYERS : null;
+  // Meals keep their parts in mealsEaten (its original name); other habits use partsDone.
+  const partsField = h => h.mealsHabit ? "mealsEaten" : "partsDone";
+  const partsOn = (h, key) => h[partsField(h)]?.[key] || [];
+  const mealsOn = partsOn;
 
-  function toggleMeal(h, key, meal) {
-    const eaten = new Set(mealsOn(h, key));
-    const adding = !eaten.has(meal);
-    if (adding) eaten.add(meal); else eaten.delete(meal);
-    const list = MEALS.map(m => m[0]).filter(m => eaten.has(m)); // always breakfast, lunch, dinner order
-    h.mealsEaten = h.mealsEaten || {};
-    if (list.length) { h.mealsEaten[key] = list; h.done[key] = list.length; }
-    else { delete h.mealsEaten[key]; delete h.done[key]; }
-    const name = MEALS.find(m => m[0] === meal)[1];
-    save(`${name} ${adding ? "eaten" : "un-marked"} (${shortDate(key)})`);
+  function togglePart(h, key, part) {
+    const parts = partsOf(h), field = partsField(h);
+    const on = new Set(partsOn(h, key));
+    const adding = !on.has(part);
+    if (adding) on.add(part); else on.delete(part);
+    const list = parts.map(m => m[0]).filter(m => on.has(m)); // always in the habit's own order
+    h[field] = h[field] || {};
+    if (list.length) { h[field][key] = list; h.done[key] = list.length; }
+    else { delete h[field][key]; delete h.done[key]; }
+    const name = parts.find(m => m[0] === part)[1];
+    save(h.mealsHabit ? `${name} ${adding ? "eaten" : "un-marked"} (${shortDate(key)})`
+      : `${name} ${h.name.toLowerCase()} ${adding ? "done" : "un-marked"} (${shortDate(key)})`);
     render();
     if (checkinIsOpen()) renderCheckin();
   }
 
-  // Breakfast / Lunch / Dinner toggles for one day.
-  function mealButtons(h, key, cls = "meal-row") {
+  // One toggle per part for one day (Breakfast / Lunch / Dinner, Morning / Night).
+  function partButtons(h, key, cls = "meal-row") {
     const row = document.createElement("div");
     row.className = cls;
-    const eaten = mealsOn(h, key);
-    for (const [id, label, icon] of MEALS) {
+    const parts = partsOf(h);
+    row.style.gridTemplateColumns = `repeat(${parts.length}, ${cls.includes("compact") ? "auto" : "1fr"})`;
+    const eaten = partsOn(h, key);
+    for (const [id, label, icon] of parts) {
       const b = document.createElement("button");
       b.type = "button";
       const on = eaten.includes(id);
@@ -1050,7 +1062,7 @@
       if (on) b.style.background = b.style.borderColor = h.color;
       b.setAttribute("aria-pressed", on);
       b.textContent = `${on ? "✓" : icon} ${label}`;
-      b.onclick = () => toggleMeal(h, key, id);
+      b.onclick = () => togglePart(h, key, id);
       row.append(b);
     }
     return row;
@@ -1215,7 +1227,7 @@
       box.append(row);
       fields.screen = t;
     }
-    if (h.mealsHabit) box.append(mealButtons(h, key, "meal-row in-editor"));
+    if (partsOf(h)) box.append(partButtons(h, key, "meal-row in-editor"));
     if (h.water) {
       const row = document.createElement("div");
       row.className = "editor-row";
@@ -1840,8 +1852,8 @@
       ctl.append(b);
       return b;
     };
-    if (h.mealsHabit) {
-      ctl.append(mealButtons(h, key, "meal-row compact"));
+    if (partsOf(h)) {
+      ctl.append(partButtons(h, key, "meal-row compact"));
     } else if (h.water) {
       const c = document.createElement("span");
       c.textContent = `${waterShown(h, count(h, key))}/${waterShown(h, target(h))} ${waterUnitLabel(h)}`;
@@ -2138,7 +2150,7 @@
           offDay && "Not a trading day",
           h.question && (ans ? `Answered ${ans === "yes" ? "Yes" : "No"}` : suggest ? `Not answered — suggested ${suggest === "yes" ? "Yes" : "No"}` : "Not answered"),
           h.journal && h.journalText?.[key] && `“${h.journalText[key].slice(0, 60)}${h.journalText[key].length > 60 ? "…" : ""}”`,
-          h.mealsHabit ? `${c}/3 meals${mealsOn(h, key).length ? ` (${mealsOn(h, key).join(", ")})` : ""}` :
+          partsOf(h) ? `${c}/${target(h)} ${h.mealsHabit ? "meals" : h.name.toLowerCase()}${partsOn(h, key).length ? ` (${partsOn(h, key).join(", ")})` : ""}` :
           h.water ? `${waterShown(h, c)}/${waterShown(h, target(h))} ${waterUnitLabel(h)} — tap to set, hold to remove one`
             : target(h) > 1 && `${c}/${target(h)} ${h.unit || ""}`,
           logged && (done ? `${shortClock(logged)} — on time` : `${shortClock(logged)} — ${minutesOff(h, logged)} min late`),
@@ -2161,11 +2173,11 @@
         } else if (logged || screenMin !== undefined) {
           style = done ? `background:${h.color}` : `box-shadow:inset 0 0 0 3px var(--danger);color:var(--danger)`;
           label = logged ? shortClock(logged) : shortDur(screenMin); small = true;
-        } else if ((h.water || h.mealsHabit) && c && !done) {
+        } else if ((h.water || partsOf(h)) && c && !done) {
           // A ring that fills partway around as the day's water adds up.
           const pct = Math.min(c / target(h) * 100, 100);
           style = `background:radial-gradient(var(--card) 58%, transparent 60%),conic-gradient(${h.color} ${pct}%, var(--empty) 0);color:${h.color}`;
-          label = h.mealsHabit ? `${c}/3` : `${waterShown(h, c)}/${waterShown(h, target(h))}`; small = true;
+          label = partsOf(h) ? `${c}/${target(h)}` : `${waterShown(h, c)}/${waterShown(h, target(h))}`; small = true;
         } else {
           style = done ? `background:${h.color}`
             : c ? `box-shadow:inset 0 0 0 3px ${h.color};color:${h.color}` : "";
@@ -2177,7 +2189,7 @@
           <span class="note-dot" style="${detail || note ? `background:${h.color}` : ""}"></span>`;
         if (editing && editing.id === h.id && editing.key === key) btn.classList.add("selected");
         btn.onclick = () => h.journal ? openJournal(key)
-          : h.sleep || h.screen || h.water || h.question || h.mealsHabit ? openEditor(h.id, key) : toggle(h.id, key);
+          : h.sleep || h.screen || h.water || h.question || partsOf(h) ? openEditor(h.id, key) : toggle(h.id, key);
         if (h.water) attachLongPress(btn, () => addWater(h, key, -1));
         week.append(btn);
       }
@@ -2194,7 +2206,7 @@
       const detailsBtn = document.createElement("button");
       detailsBtn.className = "link";
       detailsBtn.textContent = h.workout ? "Log workout" : h.sleep || h.screen ? "Log time" : h.water ? "Set amount"
-        : h.question ? "Answer a day" : h.journal || h.mealsHabit ? "Edit a day" : "Add note";
+        : h.question ? "Answer a day" : h.journal || partsOf(h) ? "Edit a day" : "Add note";
       // Going to bed after midnight still counts as the night before.
       detailsBtn.onclick = () => openEditor(h.id,
         dayKey(h.sleep === "bed" && new Date().getHours() < 12 ? addDays(today, -1) : today));
@@ -2247,7 +2259,7 @@
         row.append(minus, plus);
         el.append(row);
       }
-      if (h.mealsHabit) el.append(mealButtons(h, todayKey));
+      if (partsOf(h)) el.append(partButtons(h, todayKey));
       if (h.question && !(h.trading && !isTradingDay(todayKey))) el.append(questionRow(h, todayKey));
       if (h.journal) {
         const row = document.createElement("div");
@@ -2264,7 +2276,7 @@
         row.append(open, preview);
         el.append(row);
       }
-      if (h.sleep || h.workout || h.screen || h.water || h.question || h.mealsHabit) {
+      if (h.sleep || h.workout || h.screen || h.water || h.question || partsOf(h)) {
         const hint = document.createElement("div");
         hint.className = "hint";
         hint.textContent = h.sleep ? "Tap a day to log the time — it's checked off when you're on time."
@@ -2272,6 +2284,7 @@
           : h.water ? "Tap a day to set its amount, or press and hold a day to take off one glass."
           : h.question ? "Tap a day to answer it. Unanswered days stay blank until you do."
           : h.mealsHabit ? "Tap a meal to mark it eaten. Tap a day above to fill in a past day."
+          : h.prayers ? "Tap Morning or Night when you've prayed. Tap a day above to fill in a past day."
           : "Tap a day to check it off, or “Log workout” to record what you did.";
         el.append(hint);
       }
@@ -2283,6 +2296,7 @@
         : h.water ? waterLine(h)
         : h.eatingOut ? eatingOutLine()
         : h.mealsHabit ? mealsLine(h)
+        : h.prayers ? `🙏 Today: <b>${count(h, todayKey)}/2 prayers</b>${partsOn(h, todayKey).length === 1 ? ` · ${partsOn(h, todayKey)[0] === "morning" ? "night" : "morning"} still to go` : ""}`
         : h.workout ? workoutLine(h) : "";
       if (info) {
         const line = document.createElement("div");
@@ -4682,7 +4696,7 @@
       // Chapters tapped today come back off the Bible bookmark.
       if (h.bible) h.position = Math.max((h.position || 0) - Math.min(count(h, k), target(h)), 0);
       delete h.done[k];
-      for (const field of ["answers", "log", "minutes", "details", "excused", "mealsEaten"]) if (h[field]) delete h[field][k];
+      for (const field of ["answers", "log", "minutes", "details", "excused", "mealsEaten", "partsDone"]) if (h[field]) delete h[field][k];
     }
     editing = null;
     save("Reset today");
@@ -4693,7 +4707,7 @@
   // ---- Updates ----
   // Bump APP_VERSION with every deploy. An open app checks the live copy now and then,
   // and offers a refresh when the version there is newer.
-  const APP_VERSION = "2026.11.02-6";
+  const APP_VERSION = "2026.11.02-7";
   async function checkForUpdate() {
     if (!location.protocol.startsWith("http") || !navigator.onLine) return;
     try {
