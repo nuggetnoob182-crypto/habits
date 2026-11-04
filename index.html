@@ -190,6 +190,14 @@
   .lb-pose b { font-size: 13px; }
   .lb-pose-tabs { margin-top: 14px; }
   .export-choices b small { font-weight: 400; color: var(--muted); }
+  .timer-box { display: flex; align-items: center; gap: 12px; margin: 2px 0 8px; }
+  .timer-start { flex: 1; }
+  .timer-ring { position: relative; width: 120px; height: 120px; flex: none; }
+  .timer-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .timer-ring circle { fill: none; stroke-width: 9; stroke-linecap: round; }
+  .timer-track { stroke: var(--empty); }
+  .timer-num { position: absolute; inset: 0; display: grid; place-items: center; font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .ci-ctl .timer-box { margin: 0; }
   .reset-day { display: block; padding: 4px 0 0; font-size: 12px; }
   .update-banner {
     display: block; width: 100%; margin-bottom: 14px; padding: 10px 14px; border: none; border-radius: 10px;
@@ -732,7 +740,8 @@
       { name: "Physical focus", color: "#d946ef", question: "Physical focus", good: "yes" },
       // Morning and night prayers each keep their own streak.
       { name: "Morning prayer", color: "#ca8a04" },
-      { name: "Night prayer", color: "#4338ca" }
+      { name: "Night prayer", color: "#4338ca" },
+      { name: "Palm press", color: "#0f766e", timer: 60 }
       // Add new starters only at the end: a starter's id is its position (default-N).
     ].map((h, i) => ({ id: `default-${i}`, ...h, created, done: {} }));
   }
@@ -1062,6 +1071,146 @@
     if (!week.length) return "";
     const avg = week.reduce((s, n) => s + n, 0) / week.length;
     return `📱 ${today !== undefined ? `Today: <b>${duration(today)}</b> of ${duration(h.limit)} · ` : ""}7-day average: <b>${duration(avg)}</b>`;
+  }
+
+  // ---- Timed habits (Palm press) ----
+  // The start time is saved, so the countdown stays right through app switches and a locked
+  // screen, and a finished timer still checks off the day it was started when you come back.
+  const TIMER_KEY = "habit-tracker-timer";
+  let timerState = (() => { try { return JSON.parse(localStorage.getItem(TIMER_KEY)); } catch { return null; } })();
+  let timerTick = null, wakeLock = null, audioCtx = null;
+  const RING = 327; // circumference of the countdown ring
+  const timerLeft = () => timerState ? Math.max(timerState.secs - (Date.now() - timerState.start) / 1000, 0) : 0;
+  function storeTimer() {
+    try {
+      if (timerState) localStorage.setItem(TIMER_KEY, JSON.stringify(timerState));
+      else localStorage.removeItem(TIMER_KEY);
+    } catch {}
+  }
+
+  // The screen stays on while counting; the browser drops this when the app is hidden.
+  async function keepAwake() {
+    if (!timerState || wakeLock || !navigator.wakeLock || document.visibilityState !== "visible") return;
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } catch {}
+  }
+  function letSleep() {
+    wakeLock?.release().catch(() => {});
+    wakeLock = null;
+  }
+
+  // iPhones only allow sound that was started from a tap, so this runs on Start.
+  function unlockAudio() {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      audioCtx.resume();
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      g.gain.value = 0;
+      o.connect(g).connect(audioCtx.destination);
+      o.start();
+      o.stop(audioCtx.currentTime + 0.01);
+    } catch {}
+  }
+  function beep() {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      audioCtx.resume();
+      const now = audioCtx.currentTime;
+      for (const at of [0, 0.28]) {
+        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.frequency.value = 880;
+        g.gain.setValueAtTime(0.0001, now + at);
+        g.gain.exponentialRampToValueAtTime(0.4, now + at + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + at + 0.22);
+        o.connect(g).connect(audioCtx.destination);
+        o.start(now + at);
+        o.stop(now + at + 0.24);
+      }
+    } catch {}
+  }
+
+  function refreshAfterTimer() {
+    render();
+    if (checkinIsOpen()) renderCheckin();
+  }
+  function startTimer(h) {
+    if (timerState) return;
+    unlockAudio();
+    timerState = { id: h.id, key: dayKey(startOfToday()), start: Date.now(), secs: h.timer };
+    storeTimer();
+    keepAwake();
+    runTimer();
+    refreshAfterTimer();
+  }
+  function runTimer() {
+    clearInterval(timerTick);
+    timerTick = setInterval(updateTimer, 200);
+    updateTimer();
+  }
+  function updateTimer() {
+    if (!timerState) { clearInterval(timerTick); return; }
+    const left = timerLeft();
+    if (left <= 0) { finishTimer(); return; }
+    document.querySelectorAll(".timer-num").forEach(el => { el.textContent = Math.ceil(left); });
+    document.querySelectorAll(".timer-arc").forEach(el => { el.style.strokeDashoffset = RING * (1 - left / timerState.secs); });
+  }
+  function stopTimer() {
+    clearInterval(timerTick);
+    timerState = null;
+    storeTimer();
+    letSleep();
+  }
+  function finishTimer() {
+    const { id, key, secs } = timerState;
+    stopTimer();
+    const h = habits.find(x => x.id === id);
+    if (h && !isDone(h, key)) {
+      h.done[key] = true;
+      save(`${h.name}: ${secs} seconds done (${shortDate(key)})`);
+    }
+    navigator.vibrate?.([200, 100, 200]);
+    beep();
+    refreshAfterTimer();
+  }
+  function cancelTimer() {
+    stopTimer();
+    refreshAfterTimer();
+  }
+  // After a reload or coming back to the app.
+  function resumeTimer() {
+    if (!timerState) return;
+    keepAwake();
+    runTimer();
+  }
+
+  // Start button, or the running countdown with a ring and Cancel.
+  function timerBlock(h) {
+    const box = document.createElement("div");
+    box.className = "timer-box";
+    if (timerState?.id === h.id) {
+      const left = timerLeft();
+      box.innerHTML = `<div class="timer-ring"><svg viewBox="0 0 120 120" aria-hidden="true">
+          <circle cx="60" cy="60" r="52" class="timer-track"/>
+          <circle cx="60" cy="60" r="52" class="timer-arc" style="stroke:${h.color};stroke-dasharray:${RING};stroke-dashoffset:${RING * (1 - left / timerState.secs)}"/>
+        </svg><span class="timer-num" role="timer">${Math.ceil(left)}</span></div>`;
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.onclick = cancelTimer;
+      box.append(cancel);
+    } else {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "primary timer-start";
+      b.style.background = b.style.borderColor = h.color;
+      b.textContent = `▶ Start ${h.timer}s`;
+      b.disabled = !!timerState;
+      b.onclick = () => startTimer(h);
+      box.append(b);
+    }
+    return box;
   }
 
   // ---- Habits made of parts: Meals (breakfast, lunch, dinner) ----
@@ -1894,7 +2043,9 @@
       ctl.append(b);
       return b;
     };
-    if (partsOf(h)) {
+    if (h.timer) {
+      ctl.append(timerBlock(h));
+    } else if (partsOf(h)) {
       ctl.append(partButtons(h, key, "meal-row compact"));
     } else if (h.water) {
       const c = document.createElement("span");
@@ -2302,6 +2453,7 @@
         el.append(row);
       }
       if (partsOf(h)) el.append(partButtons(h, todayKey));
+      if (h.timer && (!isDone(h, todayKey) || timerState?.id === h.id)) el.append(timerBlock(h));
       if (h.question && !(h.trading && !isTradingDay(todayKey))) el.append(questionRow(h, todayKey));
       if (h.journal) {
         const row = document.createElement("div");
@@ -2318,7 +2470,7 @@
         row.append(open, preview);
         el.append(row);
       }
-      if (h.sleep || h.workout || h.screen || h.water || h.question || partsOf(h)) {
+      if (h.sleep || h.workout || h.screen || h.water || h.question || partsOf(h) || h.timer) {
         const hint = document.createElement("div");
         hint.className = "hint";
         hint.textContent = h.sleep ? "Tap a day to log the time — it's checked off when you're on time."
@@ -2326,6 +2478,7 @@
           : h.water ? "Tap a day to set its amount, or press and hold a day to take off one glass."
           : h.question ? "Tap a day to answer it. Unanswered days stay blank until you do."
           : h.mealsHabit ? "Tap a meal to mark it eaten. Tap a day above to fill in a past day."
+          : h.timer ? "The timer checks off today when it ends. Or tap a day to check it off by hand."
 
           : "Tap a day to check it off, or “Log workout” to record what you did.";
         el.append(hint);
@@ -4741,6 +4894,7 @@
       for (const field of ["answers", "log", "minutes", "details", "excused", "mealsEaten", "partsDone"]) if (h[field]) delete h[field][k];
     }
     editing = null;
+    if (timerState?.key === k) stopTimer();
     save("Reset today");
     render();
     if (checkinIsOpen()) renderCheckin();
@@ -4749,7 +4903,7 @@
   // ---- Updates ----
   // Bump APP_VERSION with every deploy. An open app checks the live copy now and then,
   // and offers a refresh when the version there is newer.
-  const APP_VERSION = "2026.11.02-9";
+  const APP_VERSION = "2026.11.03-1";
   async function checkForUpdate() {
     if (!location.protocol.startsWith("http") || !navigator.onLine) return;
     try {
@@ -5486,6 +5640,8 @@
   renderBackupBanner();
   protectStorage();
   lastState = snapshot();
+  resumeTimer(); // a timer left running; if it ended while away, this checks the day off
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") resumeTimer(); });
 </script>
 </body>
 </html>
