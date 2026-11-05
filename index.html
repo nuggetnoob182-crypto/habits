@@ -198,6 +198,32 @@
   .timer-track { stroke: var(--empty); }
   .timer-num { position: absolute; inset: 0; display: grid; place-items: center; font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .ci-ctl .timer-box { margin: 0; }
+  .owed-box { margin-top: 10px; padding: 12px 14px; border-radius: 12px; background: var(--empty); display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .owed-box b { font-size: 26px; font-variant-numeric: tabular-nums; }
+  .owed-box span { color: var(--muted); font-size: 13px; }
+  .owed-box + .work-totals { margin-top: 8px; }
+  .received { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .received b { color: var(--text); }
+  .work-day { padding: 0; min-width: 0; }
+  .hours-input.locked { opacity: .65; }
+  .day-job { font-size: 9px; color: var(--muted); max-width: 100%; min-height: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .day-split { padding: 0 2px; font-size: 10px; }
+  .split-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; }
+  .split-row span { min-width: 0; overflow-wrap: anywhere; }
+  .split-row input { width: 80px; }
+  .job-card { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-top: 8px; }
+  .job-badge { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .job-state { font-weight: 700; color: var(--danger); margin-top: 2px; font-size: 14px; }
+  .job-state.paid { color: var(--accent); }
+  .job-facts { font-size: 13px; color: var(--muted); }
+  .job-actions { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 4px; }
+  .job-add { margin-top: 14px; }
+  .job-edit { display: grid; gap: 8px; }
+  .lb-jobs { display: grid; gap: 6px; margin-top: 12px; }
+  .lb-jobs div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; font-size: 13px; }
+  .lb-jobs b { overflow-wrap: anywhere; }
+  .lb-jobs span:nth-child(2) { grid-column: 1; grid-row: 2; color: var(--muted); }
+  .lb-jobs span:nth-child(3) { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
   .reset-day { display: block; padding: 4px 0 0; font-size: 12px; }
   .update-banner {
     display: block; width: 100%; margin-bottom: 14px; padding: 10px 14px; border: none; border-radius: 10px;
@@ -698,6 +724,11 @@
     <button type="button" class="link" id="lbClose" aria-label="Close">✕</button>
   </div>
   <div class="lb-body" id="lbBody"></div>
+</dialog>
+
+<dialog class="badges" id="jobsDialog" aria-labelledby="jobsTitle">
+  <div class="badges-head"><h2 id="jobsTitle">💼 Jobs</h2><button type="button" class="link" id="jobsClose" aria-label="Close">✕</button></div>
+  <div class="badges-body" id="jobsBody"></div>
 </dialog>
 
 <div class="toast" id="toast" role="status" aria-live="polite" hidden>
@@ -2508,61 +2539,109 @@
     checkCelebrations();
   }
 
-  // Work hours live apart from habits: hours per day, plus pay rates that each
-  // start on a given day, so a raise doesn't rewrite what earlier days paid.
+  // Work hours are kept by job:
+  //   jobs: [{ id, name, start, rates: [{ from, rate }], status: "active" | "completed", completed?, paid?: { amount, date } }]
+  //   currentJob: the job new hours go to
+  //   log: { day: { jobId: hours } }
+  // Each rate starts on a given day, so a raise doesn't rewrite what earlier days paid.
   const WORK_KEY = "habit-tracker-work";
+  const WORK_BACKUP_KEY = "habit-tracker-work-before-jobs";
+  const FIRST_DAY = "0000-01-01";
+  const FIRST_JOB_ID = "job-iew-3"; // the same on every device, so synced copies line up
   let work = loadWork();
 
+  // Brings any saved shape up to date. Hours from before jobs existed (including ones arriving
+  // from a device that hasn't updated yet) go to IEW 3, with the old rates as its rate history.
+  function normalizeWork(data) {
+    const w = { ...(data || {}) };
+    if (!Array.isArray(w.jobs)) {
+      const days = Object.keys(w.hours || {}).sort();
+      w.jobs = [{ id: FIRST_JOB_ID, name: "IEW 3", start: days[0] || dayKey(startOfToday()), rates: w.rates || [], status: "active" }];
+      w.currentJob = FIRST_JOB_ID;
+    }
+    w.log = w.log || {};
+    if (w.jobs.some(j => j.id === FIRST_JOB_ID)) {
+      for (const [k, h] of Object.entries(w.hours || {})) if (h > 0 && !w.log[k]) w.log[k] = { [FIRST_JOB_ID]: h };
+    }
+    delete w.hours; delete w.rates; delete w.period;
+    for (const j of w.jobs) j.rates = j.rates || [];
+    if (!w.jobs.some(j => j.id === w.currentJob && j.status === "active")) w.currentJob = w.jobs.find(j => j.status === "active")?.id || null;
+    return w;
+  }
   function loadWork() {
-    try { return JSON.parse(localStorage.getItem(WORK_KEY)) || { rates: [], hours: {} }; }
-    catch { return { rates: [], hours: {} }; }
+    let data = null;
+    try { data = JSON.parse(localStorage.getItem(WORK_KEY)); } catch {}
+    const w = normalizeWork(data);
+    // The first time, keep a copy of the old format on this device and save the new one.
+    if (data && !Array.isArray(data.jobs)) {
+      try {
+        if (!localStorage.getItem(WORK_BACKUP_KEY)) localStorage.setItem(WORK_BACKUP_KEY, JSON.stringify(data));
+        localStorage.setItem(WORK_KEY, JSON.stringify(w));
+      } catch {}
+    }
+    return w;
   }
   function saveWork(label, mergeKey) {
     try { localStorage.setItem(WORK_KEY, JSON.stringify(work)); } catch {}
     commit(label, mergeKey);
   }
 
-  const FIRST_DAY = "0000-01-01";
-  function rateOn(key) {
+  const jobById = id => work.jobs.find(j => j.id === id);
+  const jobName = id => jobById(id)?.name || "Deleted job";
+  const activeJobs = () => work.jobs.filter(j => j.status === "active");
+  function rateOn(job, key) {
     let r = 0;
-    for (const x of work.rates) if (x.from <= key) r = x.rate;
+    for (const x of job?.rates || []) if (x.from <= key) r = x.rate;
     return r;
   }
   function workTotals(fromKey, toKey = dayKey(startOfToday())) {
     let hours = 0, pay = 0;
-    for (const [k, h] of Object.entries(work.hours)) {
-      if (k >= fromKey && k <= toKey) { hours += h; pay += h * rateOn(k); }
+    for (const [k, day] of Object.entries(work.log)) {
+      if (k < fromKey || k > toKey) continue;
+      for (const [id, h] of Object.entries(day)) { hours += h; pay += h * rateOn(jobById(id), k); }
     }
     return { hours, pay };
   }
+  // One job's hours, days and pay (optionally only inside a date range).
+  function jobStats(job, from = FIRST_DAY, to = "9999") {
+    let hours = 0, pay = 0, days = 0;
+    const rates = new Set();
+    for (const [k, day] of Object.entries(work.log)) {
+      const h = day[job.id];
+      if (!h || k < from || k > to) continue;
+      const rate = rateOn(job, k);
+      hours += h; pay += h * rate; days++;
+      rates.add(rate);
+    }
+    return { hours, pay, days, rates: [...rates].sort((a, b) => a - b) };
+  }
+  const isUnpaid = j => !j.paid;
+  const totalOwed = () => work.jobs.filter(isUnpaid).reduce((s, j) => s + jobStats(j).pay, 0);
+  const receivedBetween = (from, to) => work.jobs.filter(j => j.paid && j.paid.date >= from && j.paid.date <= to).reduce((s, j) => s + j.paid.amount, 0);
+  // Keeps the current job valid after a job is completed or deleted.
+  function fixCurrentJob() {
+    if (jobById(work.currentJob)?.status !== "active") work.currentJob = activeJobs()[0]?.id || null;
+  }
 
-  // Pay periods. Weekly and every-two-weeks periods count from an anchor day you
-  // choose (your first day of a pay period); the others follow the calendar.
-  const PERIODS = { weekly: "Weekly", biweekly: "Every 2 weeks", semimonthly: "Twice a month (1st & 16th)", monthly: "Monthly" };
-  const payPeriod = () => work.period || { type: "weekly", anchor: "2026-01-05" }; // a Monday
   const fromKey = k => new Date(k + "T00:00:00");
   // Whole days between two local dates, immune to daylight-saving shifts.
   const daysBetween = (a, b) =>
     Math.round((Date.UTC(b.getFullYear(), b.getMonth(), b.getDate()) - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / 864e5);
 
-  function periodRange(d) {
-    const { type, anchor } = payPeriod();
-    if (type === "weekly" || type === "biweekly") {
-      const len = type === "weekly" ? 7 : 14;
-      const start = addDays(fromKey(anchor), Math.floor(daysBetween(fromKey(anchor), d) / len) * len);
-      return [start, addDays(start, len - 1)];
-    }
-    const first = new Date(d.getFullYear(), d.getMonth(), 1);
-    const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-    if (type === "monthly") return [first, last];
-    return d.getDate() <= 15 ? [first, new Date(d.getFullYear(), d.getMonth(), 15)]
-      : [new Date(d.getFullYear(), d.getMonth(), 16), last];
-  }
-
   let workWeeksBack = 0;
+  let splitDay = null; // the day whose Split panel is open
   const money = n => n.toLocaleString(undefined, { style: "currency", currency: "USD" });
   const hrs = n => `${+n.toFixed(2)} h`;
   const shortDate = k => new Date(k + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const refreshWork = () => {
+    renderWork();
+    if (document.getElementById("jobsDialog").open) renderJobs();
+  };
+
+  function dayJobsLabel(key) {
+    const ids = Object.keys(work.log[key] || {});
+    return ids.length > 1 ? `${ids.length} jobs` : ids.length ? jobName(ids[0]) : "";
+  }
 
   function renderWork() {
     const today = startOfToday();
@@ -2575,15 +2654,12 @@
           <span class="name">Work hours</span>
           <span class="streak" id="rateNow"></span>
         </div>
+        <div class="owed-box" id="workOwed"></div>
+        <div class="work-totals" id="workTotals"></div>
+        <div class="received" id="workReceived"></div>
         <div class="rate-row">
-          <label>Rate $ <input type="number" id="rateInput" min="0" step="0.01" placeholder="0.00"></label>
-          <span>/hr</span>
-          <label id="rateFromWrap">starting <input type="date" id="rateFrom"></label>
-          <button type="button" id="rateSave">Set rate</button>
-        </div>
-        <div class="rate-row">
-          <label>Pay period <select id="periodType"></select></label>
-          <label id="anchorWrap">a period starts on <input type="date" id="periodAnchor"></label>
+          <label>Current job <select id="jobCurrent"></select></label>
+          <button type="button" id="jobsBtn">💼 Jobs</button>
         </div>
         <div class="week-nav">
           <button type="button" class="link" id="workPrev" aria-label="Previous week">‹ Earlier</button>
@@ -2591,22 +2667,15 @@
           <button type="button" class="link" id="workNext" aria-label="Next week">Later ›</button>
         </div>
         <div class="week" id="workWeek"></div>
-        <div class="work-totals" id="workTotals"></div>
-        <div class="rate" id="rateHistory" style="margin-top:8px"></div>
+        <div id="workSplit"></div>
       </div>`;
 
-    const periodType = document.getElementById("periodType");
-    for (const [v, label] of Object.entries(PERIODS)) periodType.append(new Option(label, v));
-    const periodAnchor = document.getElementById("periodAnchor");
-    periodType.value = payPeriod().type;
-    periodAnchor.value = payPeriod().anchor;
-    document.getElementById("anchorWrap").hidden = !["weekly", "biweekly"].includes(payPeriod().type);
-    const savePeriod = () => {
-      work.period = { type: periodType.value, anchor: periodAnchor.value || payPeriod().anchor };
-      saveWork("Changed pay period"); renderWork();
-    };
-    periodType.onchange = savePeriod;
-    periodAnchor.onchange = savePeriod;
+    const cur = document.getElementById("jobCurrent");
+    for (const j of activeJobs()) cur.append(new Option(j.name, j.id));
+    if (!activeJobs().length) cur.append(new Option("No active job", ""));
+    cur.value = work.currentJob || "";
+    cur.onchange = () => { work.currentJob = cur.value; saveWork(`Current job: ${jobName(cur.value)}`); refreshWork(); };
+    document.getElementById("jobsBtn").onclick = openJobs;
 
     document.getElementById("workPrev").onclick = () => { workWeeksBack++; renderWork(); };
     document.getElementById("workNext").onclick = () => { workWeeksBack = Math.max(workWeeksBack - 1, 0); renderWork(); };
@@ -2615,77 +2684,327 @@
     document.getElementById("workRange").textContent = workWeeksBack === 0 ? "Last 7 days"
       : `${shortDate(dayKey(addDays(end, -6)))} – ${shortDate(dayKey(end))}`;
 
-    const rateInput = document.getElementById("rateInput");
-    const rateFrom = document.getElementById("rateFrom");
-    if (work.rates.length) rateInput.value = rateOn(todayKey).toFixed(2);
-    // The first rate covers every day; the start date only matters once there's a rate to change from.
-    document.getElementById("rateFromWrap").hidden = !work.rates.length;
-    rateFrom.value = todayKey;
-    document.getElementById("rateSave").onclick = () => {
-      const rate = parseFloat(rateInput.value);
-      if (isNaN(rate) || rate < 0) return;
-      const from = work.rates.length ? rateFrom.value || todayKey : FIRST_DAY;
-      work.rates = work.rates.filter(r => r.from !== from);
-      work.rates.push({ from, rate });
-      work.rates.sort((a, b) => a.from.localeCompare(b.from));
-      saveWork(`Set rate to ${money(rate)}/hr`); renderWork();
-    };
-
     const week = document.getElementById("workWeek");
     for (let i = 6; i >= 0; i--) {
       const d = addDays(end, -i);
       const key = dayKey(d);
       const isToday = key === todayKey;
-      const cell = document.createElement("label");
-      cell.className = "day" + (isToday ? " is-today" : "");
+      const cell = document.createElement("div");
+      cell.className = "day work-day" + (isToday ? " is-today" : "");
       cell.innerHTML = `<small>${isToday ? "Today" : d.toLocaleDateString(undefined,
         workWeeksBack ? { weekday: "short", day: "numeric" } : { weekday: "short" })}</small>`;
+      const entry = work.log[key] || {};
+      const ids = Object.keys(entry);
+      const total = Object.values(entry).reduce((s, h) => s + h, 0);
+      // A day with hours keeps its job; an empty day goes to the current job.
+      const dayJob = ids[0] || work.currentJob;
       const input = document.createElement("input");
       input.type = "number";
       input.className = "hours-input";
       input.min = 0; input.max = 24; input.step = 0.25;
       input.inputMode = "decimal";
       input.placeholder = "–";
-      input.title = d.toLocaleDateString();
-      if (work.hours[key]) input.value = work.hours[key];
+      input.setAttribute("aria-label", `Hours for ${d.toLocaleDateString()}`);
+      input.title = ids.map(id => `${jobName(id)}: ${hrs(entry[id])}`).join(" · ") || d.toLocaleDateString();
+      if (total) input.value = +total.toFixed(2);
+      // Split days and hours on a completed job are changed from the Split panel instead.
+      const locked = ids.length > 1 || (ids.length === 1 && jobById(ids[0])?.status !== "active") || !dayJob;
+      input.readOnly = locked;
+      if (locked) input.classList.add("locked");
+      const label = document.createElement("span");
+      label.className = "day-job";
+      label.textContent = dayJobsLabel(key);
       input.oninput = () => {
         const v = parseFloat(input.value);
-        if (!v || v < 0) delete work.hours[key];
-        else work.hours[key] = Math.min(v, 24);
+        if (!v || v < 0) delete work.log[key];
+        else work.log[key] = { [dayJob]: Math.min(v, 24) };
+        label.textContent = dayJobsLabel(key);
         // Typing several digits is one change for Undo.
         saveWork(`Updated hours for ${shortDate(key)}`, `hours-${key}`); updateWorkTotals();
       };
-      cell.append(input);
+      const split = document.createElement("button");
+      split.type = "button";
+      split.className = "link day-split";
+      split.textContent = "Split";
+      split.setAttribute("aria-label", `Split hours for ${d.toLocaleDateString()}`);
+      split.onclick = () => { splitDay = splitDay === key ? null : key; renderWork(); };
+      cell.append(input, label, split);
       week.append(cell);
     }
-
-    const hist = document.getElementById("rateHistory");
-    hist.textContent = work.rates.length > 1
-      ? "Rate history: " + work.rates.map(r =>
-          `${money(r.rate)}${r.from === FIRST_DAY ? " at first" : " from " + shortDate(r.from)}`).join(" · ")
-      : "";
-
+    if (splitDay) document.getElementById("workSplit").append(buildSplit(splitDay));
     updateWorkTotals();
   }
 
+  // Divide one day's hours across jobs. Hours on a completed job stay as they are.
+  function buildSplit(key) {
+    const box = document.createElement("div");
+    box.className = "editor";
+    const title = document.createElement("b");
+    title.textContent = `Split ${fromKey(key).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}`;
+    box.append(title);
+    const entry = work.log[key] || {};
+    const jobs = work.jobs.filter(j => j.status === "active" || entry[j.id]);
+    const inputs = [];
+    const total = document.createElement("span");
+    total.className = "hint";
+    total.style.margin = "0";
+    const showTotal = () => {
+      const sum = inputs.reduce((s, [, i]) => s + (parseFloat(i.value) || 0), 0) + jobs.filter(j => j.status !== "active").reduce((s, j) => s + (entry[j.id] || 0), 0);
+      total.textContent = `Total: ${hrs(sum)}`;
+    };
+    for (const j of jobs) {
+      const row = document.createElement("label");
+      row.className = "split-row";
+      const name = document.createElement("span");
+      name.textContent = j.name + (j.status === "active" ? "" : " (completed)");
+      const inp = document.createElement("input");
+      inp.type = "number"; inp.min = 0; inp.max = 24; inp.step = 0.25; inp.inputMode = "decimal"; inp.placeholder = "0";
+      if (entry[j.id]) inp.value = entry[j.id];
+      if (j.status === "active") { inputs.push([j, inp]); inp.oninput = showTotal; }
+      else inp.disabled = true;
+      row.append(name, inp);
+      box.append(row);
+    }
+    if (activeJobs().length < 2) box.insertAdjacentHTML("beforeend", `<span class="hint" style="margin:0">Add another job under 💼 Jobs to split a day between jobs.</span>`);
+    const btns = document.createElement("div");
+    btns.className = "editor-row";
+    const ok = document.createElement("button");
+    ok.type = "button"; ok.className = "primary"; ok.textContent = "Save";
+    ok.onclick = () => {
+      const next = {};
+      for (const j of jobs) if (j.status !== "active" && entry[j.id]) next[j.id] = entry[j.id];
+      for (const [j, inp] of inputs) { const v = parseFloat(inp.value); if (v > 0) next[j.id] = Math.min(v, 24); }
+      if (Object.keys(next).length) work.log[key] = next; else delete work.log[key];
+      splitDay = null;
+      saveWork(`Split hours for ${shortDate(key)}`); refreshWork();
+    };
+    const close = document.createElement("button");
+    close.type = "button"; close.textContent = "Close";
+    close.onclick = () => { splitDay = null; renderWork(); };
+    btns.append(ok, close, total);
+    box.append(btns);
+    showTotal();
+    return box;
+  }
+
   function updateWorkTotals() {
-    const today = startOfToday();
-    const todayKey = dayKey(today);
-    const rate = rateOn(todayKey);
-    document.getElementById("rateNow").textContent = work.rates.length ? `${money(rate)}/hr` : "Set your rate";
-    const [curStart, curEnd] = periodRange(today);
-    const [lastStart, lastEnd] = periodRange(addDays(curStart, -1));
-    const range = (a, b) => `${shortDate(dayKey(a))} – ${shortDate(dayKey(b))}`;
+    const todayKey = dayKey(startOfToday());
+    const job = jobById(work.currentJob);
+    document.getElementById("rateNow").textContent = job ? `${job.name}${job.rates.length ? ` · ${money(rateOn(job, todayKey))}/hr` : ""}` : "No current job";
+    const unpaid = work.jobs.filter(isUnpaid).filter(j => jobStats(j).pay > 0).length;
+    document.getElementById("workOwed").innerHTML = `<b>${money(totalOwed())}</b><span>owed${unpaid ? ` across ${unpaid} unpaid job${unpaid === 1 ? "" : "s"}` : ""}</span>`;
+    const monthStart = todayKey.slice(0, 8) + "01", yearStart = todayKey.slice(0, 5) + "01-01";
     const periods = [
-      ["This pay period", range(curStart, curEnd), dayKey(curStart), todayKey],
-      ["Last pay period", range(lastStart, lastEnd), dayKey(lastStart), dayKey(lastEnd)],
-      ["This month", "", todayKey.slice(0, 8) + "01", todayKey],
-      ["All time", "", FIRST_DAY, todayKey]
+      ["This week", dayKey(weekStartOf(startOfToday()))],
+      ["This month", monthStart],
+      ["This year", yearStart],
+      ["All time", FIRST_DAY]
     ];
-    document.getElementById("workTotals").innerHTML = periods.map(([label, sub, from, to]) => {
-      const t = workTotals(from, to);
-      return `<div><b>${money(t.pay)}</b>${label} · ${hrs(t.hours)}${sub ? `<br><span class="sub">${sub}</span>` : ""}</div>`;
+    document.getElementById("workTotals").innerHTML = periods.map(([label, from]) => {
+      const t = workTotals(from);
+      return `<div><b>${money(t.pay)}</b>${label} · ${hrs(t.hours)}</div>`;
     }).join("");
+    document.getElementById("workReceived").innerHTML = `💵 Received: <b>${money(receivedBetween(monthStart, todayKey))}</b> this month · ` +
+      `<b>${money(receivedBetween(yearStart, todayKey))}</b> this year · <b>${money(receivedBetween(FIRST_DAY, "9999"))}</b> all time`;
+  }
+
+  // ---- Job screen ----
+  const jobView = { edit: null, pay: null };
+  function openJobs() {
+    jobView.edit = jobView.pay = null;
+    renderJobs();
+    const dlg = document.getElementById("jobsDialog");
+    if (!dlg.open) dlg.showModal();
+  }
+  function rateHistoryText(j) {
+    return j.rates.map(r => `${money(r.rate)}${r.from === FIRST_DAY ? " at first" : " from " + shortDate(r.from)}`).join(" · ");
+  }
+
+  function renderJobs() {
+    const body = document.getElementById("jobsBody");
+    body.innerHTML = "";
+    for (const [title, list] of [["Active", activeJobs()], ["Completed", work.jobs.filter(j => j.status !== "active")]]) {
+      if (!list.length) continue;
+      body.insertAdjacentHTML("beforeend", `<h3 class="t-h">${title}</h3>`);
+      for (const j of list) body.append(jobCard(j));
+    }
+    if (!work.jobs.length) body.insertAdjacentHTML("beforeend", `<p class="hint">No jobs yet.</p>`);
+
+    const todayKey = dayKey(startOfToday());
+    const form = document.createElement("form");
+    form.className = "editor job-add";
+    form.innerHTML = `<b>Add a job</b>
+      <div class="editor-row"><input type="text" name="name" placeholder="Job name" maxlength="50" required></div>
+      <div class="editor-row">
+        <label>Rate $ <input type="number" name="rate" min="0" step="0.01" inputmode="decimal" required class="mins"></label>
+        <label>Start <input type="date" name="start" required></label>
+      </div>
+      <div class="editor-row"><button type="submit" class="primary">Add job</button></div>`;
+    form.elements.start.value = todayKey;
+    form.onsubmit = e => {
+      e.preventDefault();
+      const name = form.elements.name.value.trim(), rate = parseFloat(form.elements.rate.value);
+      if (!name || isNaN(rate) || rate < 0) return;
+      const job = { id: uid(), name, start: form.elements.start.value || todayKey, rates: [{ from: FIRST_DAY, rate }], status: "active" };
+      work.jobs.push(job);
+      fixCurrentJob();
+      saveWork(`Added job ${name}`); refreshWork();
+    };
+    body.append(form);
+  }
+
+  function jobCard(j) {
+    const s = jobStats(j);
+    const card = document.createElement("div");
+    card.className = "job-card";
+    const head = document.createElement("div");
+    head.className = "firm-head";
+    const name = document.createElement("b");
+    name.textContent = j.name;
+    const badge = document.createElement("span");
+    badge.className = "job-badge";
+    badge.textContent = j.id === work.currentJob ? "Current job" : j.status === "active" ? "Active" : "Completed";
+    head.append(name, badge);
+    card.append(head);
+
+    const state = document.createElement("div");
+    if (j.paid) {
+      const diff = j.paid.amount - s.pay;
+      state.className = "job-state paid";
+      state.textContent = `Paid ${money(j.paid.amount)} on ${shortDate(j.paid.date)}` +
+        (Math.abs(diff) >= 0.005 ? ` · ${money(Math.abs(diff))} ${diff < 0 ? "less" : "more"} than the ${money(s.pay)} calculated` : "");
+    } else {
+      state.className = "job-state";
+      state.textContent = `Unpaid — ${money(s.pay)} owed`;
+    }
+    card.append(state);
+    const facts = document.createElement("div");
+    facts.className = "job-facts";
+    facts.textContent = `${hrs(s.hours)} · ${s.days} day${s.days === 1 ? "" : "s"} · ${money(s.pay)} pay · started ${shortDate(j.start)}`;
+    card.append(facts);
+    if (j.rates.length) {
+      const r = document.createElement("div");
+      r.className = "job-facts";
+      r.textContent = `Rate: ${rateHistoryText(j)}`;
+      card.append(r);
+    }
+
+    const acts = document.createElement("div");
+    acts.className = "job-actions";
+    const act = (text, fn, cls = "link") => { const b = document.createElement("button"); b.type = "button"; b.className = cls; b.textContent = text; b.onclick = fn; acts.append(b); };
+    if (j.status === "active" && j.id !== work.currentJob) act("Make current", () => {
+      work.currentJob = j.id; saveWork(`Current job: ${j.name}`); refreshWork();
+    });
+    if (!j.paid) act("Mark paid", () => { jobView.pay = jobView.pay === j.id ? null : j.id; jobView.edit = null; renderJobs(); });
+    act("Edit", () => { jobView.edit = jobView.edit === j.id ? null : j.id; jobView.pay = null; renderJobs(); });
+    if (j.status !== "active") act("Reopen", () => {
+      if (j.paid && !confirm(`Reopen ${j.name}? Its ${money(j.paid.amount)} payment will be removed and it goes back to Unpaid.`)) return;
+      j.status = "active";
+      delete j.paid; delete j.completed;
+      fixCurrentJob();
+      saveWork(`Reopened ${j.name}`); refreshWork();
+    });
+    act("Delete", () => {
+      if (!confirm(`Delete ${j.name} and its ${hrs(s.hours)} of logged hours? You can undo this right after.`)) return;
+      work.jobs = work.jobs.filter(x => x.id !== j.id);
+      for (const [k, day] of Object.entries(work.log)) {
+        delete day[j.id];
+        if (!Object.keys(day).length) delete work.log[k];
+      }
+      fixCurrentJob();
+      saveWork(`Deleted job ${j.name}`); refreshWork();
+    }, "link danger");
+    card.append(acts);
+    if (jobView.pay === j.id) card.append(markPaidPanel(j, s));
+    if (jobView.edit === j.id) card.append(editJobPanel(j));
+    return card;
+  }
+
+  function markPaidPanel(j, s) {
+    const box = document.createElement("form");
+    box.className = "editor";
+    box.innerHTML = `<div class="editor-row">
+        <label>Received $ <input type="number" name="amount" min="0" step="0.01" inputmode="decimal" required class="mins"></label>
+        <label>Date <input type="date" name="date" required></label>
+      </div>
+      <span class="hint" style="margin:0"></span>
+      <div class="editor-row"><button type="submit" class="primary">Mark paid</button><button type="button" class="cancel">Cancel</button></div>`;
+    const f = box.elements, note = box.querySelector(".hint");
+    f.amount.value = s.pay.toFixed(2);
+    f.date.value = dayKey(startOfToday());
+    const showDiff = () => {
+      const diff = (parseFloat(f.amount.value) || 0) - s.pay;
+      note.textContent = Math.abs(diff) >= 0.005 ? `${money(Math.abs(diff))} ${diff < 0 ? "less" : "more"} than the ${money(s.pay)} calculated` : `Matches the ${money(s.pay)} calculated`;
+    };
+    f.amount.oninput = showDiff;
+    showDiff();
+    box.querySelector(".cancel").onclick = () => { jobView.pay = null; renderJobs(); };
+    box.onsubmit = e => {
+      e.preventDefault();
+      const amount = Math.round(parseFloat(f.amount.value) * 100) / 100, date = f.date.value;
+      if (isNaN(amount) || amount < 0 || !date) return;
+      j.paid = { amount, date };
+      j.status = "completed";
+      j.completed = date;
+      fixCurrentJob();
+      jobView.pay = null;
+      saveWork(`${j.name} paid ${money(amount)}`); refreshWork();
+    };
+    return box;
+  }
+
+  function editJobPanel(j) {
+    const todayKey = dayKey(startOfToday());
+    const box = document.createElement("div");
+    box.className = "editor";
+    const details = document.createElement("form");
+    details.className = "job-edit";
+    details.innerHTML = `<div class="editor-row"><input type="text" name="name" maxlength="50" required></div>
+      <div class="editor-row">
+        <label>Start <input type="date" name="start" required></label>
+        <label>Status <select name="status"><option value="active">Active</option><option value="completed">Completed</option></select></label>
+      </div>
+      <div class="editor-row"><button type="submit" class="primary">Save</button><button type="button" class="cancel">Close</button></div>`;
+    const d = details.elements;
+    d.name.value = j.name; d.start.value = j.start; d.status.value = j.status;
+    // A paid job stays completed; use Reopen to undo the payment.
+    d.status.disabled = !!j.paid;
+    details.querySelector(".cancel").onclick = () => { jobView.edit = null; renderJobs(); };
+    details.onsubmit = e => {
+      e.preventDefault();
+      if (!d.name.value.trim()) return;
+      j.name = d.name.value.trim();
+      j.start = d.start.value || j.start;
+      if (!j.paid && d.status.value !== j.status) {
+        j.status = d.status.value;
+        if (j.status === "completed") j.completed = todayKey; else delete j.completed;
+      }
+      fixCurrentJob();
+      jobView.edit = null;
+      saveWork(`Updated job ${j.name}`); refreshWork();
+    };
+    const rate = document.createElement("form");
+    rate.className = "editor-row";
+    rate.innerHTML = `<label>New rate $ <input type="number" name="rate" min="0" step="0.01" inputmode="decimal" required class="mins"></label>
+      <label>starting <input type="date" name="from"></label>
+      <button type="submit">Set rate</button>`;
+    const r = rate.elements;
+    if (j.rates.length) r.rate.value = rateOn(j, todayKey).toFixed(2);
+    r.from.value = todayKey;
+    // The first rate covers every day; after that, a rate starts on the date picked.
+    r.from.parentElement.hidden = !j.rates.length;
+    rate.onsubmit = e => {
+      e.preventDefault();
+      const value = parseFloat(r.rate.value);
+      if (isNaN(value) || value < 0) return;
+      const from = j.rates.length ? r.from.value || todayKey : FIRST_DAY;
+      j.rates = j.rates.filter(x => x.from !== from);
+      j.rates.push({ from, rate: value });
+      j.rates.sort((a, b) => a.from.localeCompare(b.from));
+      saveWork(`${j.name}: rate ${money(value)}/hr`); refreshWork();
+    };
+    box.append(details, rate);
+    return box;
   }
 
   // ---- Weekly weight ----
@@ -4544,7 +4863,7 @@
     if (r === "custom" && lbView.from && lbView.to) return [lbView.from, lbView.to > today ? today : lbView.to];
     if (r === "year") return [`${t.getFullYear()}-01-01`, today];
     if (r === "all") {
-      const starts = [...habits.map(h => dayKey(trackingStart(h))), spendStart(), ...Object.keys(work.hours), ...weight.entries.map(e => e.date), ...Object.keys(trading.days)].filter(Boolean).sort();
+      const starts = [...habits.map(h => dayKey(trackingStart(h))), spendStart(), ...Object.keys(work.log), ...weight.entries.map(e => e.date), ...Object.keys(trading.days)].filter(Boolean).sort();
       return [starts[0] || today, today];
     }
     const months = r === "6m" ? 6 : 3;
@@ -4736,8 +5055,26 @@
         <h4>🍔 Spent eating out per month</h4>${lbBars(eatBars, { color: "#f97316", fmt: money })}`));
     }
 
-    // ---- Money ----
+    // ---- Work ----
     const wt = workTotals(from, to);
+    const rangeJobs = work.jobs.map(j => ({ j, s: jobStats(j, from, to) }))
+      .filter(({ j, s }) => s.hours || (j.paid && j.paid.date >= from && j.paid.date <= to) || (j.completed && j.completed >= from && j.completed <= to));
+    if (wt.hours || rangeJobs.length) {
+      const doneJobs = work.jobs.filter(j => j.status === "completed" && j.completed >= from && j.completed <= to).length;
+      const rateText = rs => !rs.length ? "" : rs.length === 1 ? `${money(rs[0])}/hr` : `${money(rs[0])}–${money(rs[rs.length - 1])}/hr`;
+      parts.push(card("Work", `<div class="lb-tiles">
+          ${tile(hrs(wt.hours), "worked")}
+          ${tile(money(wt.pay), "pay earned")}
+          ${tile(money(receivedBetween(from, to)), "money received")}
+          ${tile(doneJobs, `job${doneJobs === 1 ? "" : "s"} completed`)}
+        </div>
+        <div class="lb-jobs">${rangeJobs.map(({ j, s }) => `<div>
+          <b>${esc(j.name)}</b><span>${hrs(s.hours)}${s.rates.length ? ` · ${rateText(s.rates)}` : ""}</span>
+          <span class="${j.paid ? "lb-best" : "lb-worst"}">${j.paid ? `Paid ${money(j.paid.amount)}` : "Unpaid"}</span>
+        </div>`).join("")}</div>`));
+    }
+
+    // ---- Money ----
     const spent = spentBetween(from, to);
     const cats = Object.entries(categoryTotals(from, to)).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
     let noSpend = 0;
@@ -4747,7 +5084,6 @@
     const underMonths = endedMonths.filter(m => monthTotal(m) <= budgetFor(m)).length;
     const catMax = cats[0]?.[1] || 1;
     parts.push(card("Money", `<div class="lb-tiles">
-        ${tile(hrs(wt.hours), "worked", money(wt.pay) + " pay")}
         ${tile(money(spent), "spent")}
         ${tile(noSpend, "no-spend days")}
         ${tile(endedMonths.length ? `${underMonths}/${endedMonths.length}` : "–", "months under budget")}
@@ -4903,7 +5239,7 @@
   // ---- Updates ----
   // Bump APP_VERSION with every deploy. An open app checks the live copy now and then,
   // and offers a refresh when the version there is newer.
-  const APP_VERSION = "2026.11.03-1";
+  const APP_VERSION = "2026.11.04-1";
   async function checkForUpdate() {
     if (!location.protocol.startsWith("http") || !navigator.onLine) return;
     try {
@@ -4925,7 +5261,7 @@
   const SYNC_KEY = "habit-tracker-sync";
   const SYNC_EVERY = 3 * 60 * 1000;
   // Arrays whose items have ids are merged item by item; any other array is merged whole.
-  const ID_ARRAYS = new Set(["/habits", "/spending/entries", "/spending/favorites", "/spending/recurring",
+  const ID_ARRAYS = new Set(["/habits", "/work/jobs", "/spending/entries", "/spending/favorites", "/spending/recurring",
     "/weight/entries", "/trading/firms", "/trading/payouts", "/trading/costs"]);
 
   // Device-only sync settings and change times (not part of backups).
@@ -4998,7 +5334,7 @@
   // Replaces local data with the merged copy (no Undo, no change stamps — it came from sync).
   function applyMerged(m) {
     habits = fixStarters((m.habits || []).map(h => ({ ...h, done: h.done || {} })));
-    work = { rates: [], hours: {}, ...(m.work || {}) };
+    work = normalizeWork(m.work);
     spending = normalizeSpending(m.spending);
     weight = { weighDay: 1, goal: null, entries: [], ...(m.weight || {}) };
     trading = normalizeTrading(m.trading);
@@ -5334,6 +5670,8 @@
 
   function showUndoToast() {
     const toast = document.getElementById("toast");
+    // Anything outside an open dialog can't be tapped, so the toast moves into it.
+    ([...document.querySelectorAll("dialog[open]")].pop() || document.body).append(toast);
     document.getElementById("toastText").textContent = undo.label;
     toast.hidden = false;
     clearTimeout(undo.timer);
@@ -5354,8 +5692,8 @@
       localStorage.setItem(TRADING_KEY, JSON.stringify(trading));
       localStorage.setItem(MONTHLY_KEY, JSON.stringify(monthly));
     } catch {}
-    editing = null; weightView.editId = null;
-    render(); renderWeight(); renderWork(); renderTrading(); renderSpending(); renderGoalLine();
+    editing = null; weightView.editId = null; splitDay = null;
+    render(); renderWeight(); refreshWork(); renderTrading(); renderSpending(); renderGoalLine();
   }
 
   document.getElementById("toastUndo").onclick = () => {
@@ -5380,7 +5718,7 @@
       const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
       const lines = [
         `• ${n(habits.length, "habit", "habits")} → ${imported.habits.length}`,
-        imported.work && `• ${n(Object.keys(work.hours).length, "work day", "work days")} → ${Object.keys(imported.work.hours || {}).length}`,
+        imported.work && `• ${n(Object.keys(work.log).length, "work day", "work days")} → ${Object.keys(imported.work.log || imported.work.hours || {}).length}`,
         imported.spending && `• ${n(spending.entries.length, "purchase", "purchases")} → ${(imported.spending.entries || []).length}`,
         imported.weight && `• ${n(weight.entries.length, "weigh-in", "weigh-ins")} → ${(imported.weight.entries || []).length}`,
         imported.monthly && `• ${n(Object.keys(monthly.months).length, "month of goals", "months of goals")} → ${Object.keys(imported.monthly.months || {}).length}`,
@@ -5395,7 +5733,7 @@
       if (confirm(msg)) {
         // One Undo covers the whole import.
         habits = fixStarters(imported.habits); save("Imported backup", "import"); render();
-        if (imported.work) { work = imported.work; saveWork("Imported backup", "import"); renderWork(); }
+        if (imported.work) { work = normalizeWork(imported.work); saveWork("Imported backup", "import"); renderWork(); }
         if (imported.spending) { spending = normalizeSpending(imported.spending); saveSpending("Imported backup", "import"); renderSpending(); }
         if (imported.weight) { weight = { weighDay: 1, goal: null, entries: [], ...imported.weight }; saveWeight("Imported backup", "import"); renderWeight(); }
         if (imported.trading) { trading = normalizeTrading(imported.trading); saveTrading("Imported backup", "import"); renderTrading(); }
@@ -5571,6 +5909,9 @@
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkForUpdate(); });
 
   document.getElementById("resetDayBtn").onclick = resetToday;
+  const jobsDialog = document.getElementById("jobsDialog");
+  document.getElementById("jobsClose").onclick = () => jobsDialog.close();
+  jobsDialog.onclick = e => { if (e.target === jobsDialog) jobsDialog.close(); };
   document.getElementById("syncChip").onclick = () => tokenValid() ? syncNow() : requestToken(false);
   // Sync: on open, a few seconds after each change (see noteChange), every few minutes,
   // when the app comes back to the front or goes to the back, and when back online.
